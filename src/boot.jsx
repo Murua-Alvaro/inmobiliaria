@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ScanLine } from 'lucide-react'
 import './main.jsx'
+import './intelligentGeometry.css'
 
 function GeometryLazyLauncher() {
   const [Module, setModule] = useState(null)
@@ -22,7 +23,7 @@ function GeometryLazyLauncher() {
   }
 
   if (Module) return <Module />
-  return <button className="geo-launcher" onClick={open}><ScanLine size={15}/><span>{loading ? 'CARGANDO VISIÓN…' : 'LEVANTAMIENTO 3D'}</span><b>IA</b></button>
+  return <button className="ig-launch" onClick={open}><ScanLine size={15}/><span>{loading ? 'CARGANDO VISIÓN…' : 'LEVANTAMIENTO 3D'}</span><b>IA</b></button>
 }
 
 const host = document.createElement('div')
