@@ -1,0 +1,7 @@
+@media print {
+  html, body, #root { background: #fff !important; overflow: visible !important; height: auto !important; }
+  .app-shell { display: block !important; height: auto !important; background: #fff !important; }
+  .rail, .workspace, .no-print { display: none !important; }
+  .ficha-backdrop { position: static !important; display: block !important; background: #fff !important; padding: 0 !important; backdrop-filter: none !important; }
+  .ficha-sheet { width: 100% !important; max-width: none !important; box-shadow: none !important; padding: 20px 24px !important; }
+}
