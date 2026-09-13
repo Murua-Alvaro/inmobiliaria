@@ -2,482 +2,281 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import {
-  ArrowDownRight,
-  ArrowUpRight,
-  BarChart3,
-  Building2,
-  ChevronRight,
-  CircleDollarSign,
-  Download,
-  Gauge,
-  Home,
-  Layers3,
-  MapPin,
-  Menu,
-  Search,
-  SlidersHorizontal,
-  Sparkles,
-  Target,
-  Users,
-  X,
-} from 'lucide-react'
-import { marketStats, projects, zones } from './data'
+import { BarChart3, Building2, ChevronDown, Download, Info, Landmark, Map as MapIcon, Search, X } from 'lucide-react'
+import { inppData, inppMeta } from './data'
 import './styles.css'
 
-const money = (value) => new Intl.NumberFormat('es-MX', {
-  style: 'currency', currency: 'MXN', maximumFractionDigits: 0
-}).format(value)
+const fmt = (v, d = 0) => Number.isFinite(Number(v)) ? Number(v).toLocaleString('es-MX', { minimumFractionDigits:d, maximumFractionDigits:d }) : '—'
+const pct = (v, d = 1) => Number.isFinite(Number(v)) ? `${fmt(v,d)}%` : '—'
+const mxn = (v) => new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN',maximumFractionDigits:0}).format(Number(v)||0)
+const compactMXN = (v) => {
+  const n = Number(v)||0
+  if (n >= 1e9) return `$${(n/1e9).toFixed(2)} mil M`
+  if (n >= 1e6) return `$${(n/1e6).toFixed(1)} M`
+  return mxn(n)
+}
+const ratio = (a,b,m=100) => Number(b)>0 && Number.isFinite(Number(a)) ? Number(a)/Number(b)*m : null
+const num = (v) => v === null || v === undefined || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null
 
-const shortMoney = (value) => {
-  if (value >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(2)} mil M`
-  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)} M`
-  return money(value)
+const METRICS = [
+  { key:'pobtot', label:'Población', short:'Población', format:v=>fmt(v), help:'Tamaño de la población residente censada.' },
+  { key:'adult_share_pct', label:'18 años y más', short:'Adultos', format:v=>pct(v), help:'Peso de la población adulta dentro del AGEB.' },
+  { key:'prom_ocup', label:'Ocupantes por vivienda', short:'Hogar', format:v=>`${fmt(v,1)} pers.`, help:'Promedio de ocupantes por vivienda particular habitada.' },
+  { key:'born_elsewhere_pct', label:'Nacidos en otra entidad', short:'Origen externo', format:v=>pct(v), help:'Población nacida fuera de Sinaloa; no equivale a migración reciente.' },
+  { key:'interstate_2015_pct', label:'Residía en otra entidad en 2015', short:'Movilidad', format:v=>pct(v), help:'Señal de movilidad interestatal reciente al Censo 2020.' },
+]
+
+function unpackCore(payload) {
+  const out = {}
+  payload.rows.forEach(row => {
+    const record = Object.fromEntries(payload.columns.map((c,i)=>[c,row[i]]))
+    const id = String(record.cvegeo_ageb||'').trim()
+    if (id) out[id] = record
+  })
+  return out
+}
+function derive(core, extra) {
+  for (const r of extra.records || []) {
+    const id = String(r.cvegeo_ageb||'').trim()
+    if (id) core[id] = {...(core[id]||{}),...r}
+  }
+  Object.values(core).forEach(r => {
+    r.adult_share_pct = ratio(r.p_18ymas,r.pobtot)
+    r.born_elsewhere_pct = ratio(r.pnacoe,r.pobtot)
+    r.interstate_2015_pct = ratio(r.presoe15,r.pobtot)
+    r.women_share_pct = ratio(r.pobfem,r.pobtot)
+    r.men_share_pct = ratio(r.pobmas,r.pobtot)
+  })
+  return core
+}
+function isCity(record) {
+  const id=String(record.cvegeo_ageb||'')
+  return id.slice(5,9)==='0001' && Number(record.pobtot||0)>0
+}
+function median(values) {
+  const a=values.filter(v=>Number.isFinite(v)).sort((x,y)=>x-y)
+  if (!a.length) return null
+  const i=Math.floor(a.length/2)
+  return a.length%2?a[i]:(a[i-1]+a[i])/2
+}
+function compareWord(value, values) {
+  if (!Number.isFinite(Number(value))) return 'Sin comparación'
+  const m=median(values.map(Number))
+  if (!Number.isFinite(m)) return 'Sin comparación'
+  const diff=(Number(value)-m)/(Math.abs(m)||1)
+  if (diff > .12) return 'Por encima de la mediana urbana'
+  if (diff < -.12) return 'Por debajo de la mediana urbana'
+  return 'Cerca de la mediana urbana'
 }
 
-function Sparkline({ values }) {
-  const width = 240
-  const height = 62
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const range = max - min || 1
-  const points = values.map((v, i) => {
-    const x = (i / (values.length - 1)) * width
-    const y = height - 6 - ((v - min) / range) * (height - 16)
-    return `${x},${y}`
-  }).join(' ')
-
-  return (
-    <svg className="sparkline" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
-      <line x1="0" y1="55" x2={width} y2="55" className="spark-base" />
-      <polyline points={points} className="spark-line" fill="none" vectorEffect="non-scaling-stroke" />
-    </svg>
-  )
+function Header({page,setPage}) {
+  return <header className="site-header">
+    <button className="brand" onClick={()=>setPage('territorio')}><span>G</span><div><strong>GROWA</strong><small>INMOBILIARIA</small></div></button>
+    <nav>
+      <button className={page==='territorio'?'active':''} onClick={()=>setPage('territorio')}>Territorio</button>
+      <button className={page==='indicadores'?'active':''} onClick={()=>setPage('indicadores')}>Indicadores</button>
+    </nav>
+    <div className="header-context"><strong>Mazatlán, Sin.</strong><span>Inteligencia para desarrollo</span></div>
+  </header>
 }
 
-function Distribution({ labels, values }) {
-  const max = Math.max(...values)
-  return (
-    <div className="distribution">
-      {labels.map((label, i) => (
-        <div className="distribution-row" key={label}>
-          <div className="distribution-label">{label}</div>
-          <div className="distribution-track"><span style={{ width: `${(values[i] / max) * 100}%` }} /></div>
-          <div className="distribution-value">{values[i]}%</div>
-        </div>
-      ))}
-    </div>
-  )
+function grayscale(value,min,max) {
+  if (!Number.isFinite(value)) return '#f4f4f4'
+  const t=Math.max(0,Math.min(1,(value-min)/(max-min||1)))
+  const shades=['#f3f3f3','#dedede','#bdbdbd','#929292','#5f5f5f','#222222']
+  return shades[Math.min(shades.length-1,Math.floor(t*shades.length))]
 }
 
-function Metric({ label, value, meta, trend }) {
-  return (
-    <div className="metric-cell">
-      <div className="metric-label">{label}</div>
-      <div className="metric-main">{value}</div>
-      {meta && <div className={`metric-meta ${trend === 'up' ? 'positive' : ''}`}>{meta}</div>}
-    </div>
-  )
-}
+function AgebMap({geometry,records,metric,selectedId,onSelect,search}) {
+  const node=useRef(null), mapRef=useRef(null), layerRef=useRef(null), firstFit=useRef(true)
+  const metricDef=METRICS.find(m=>m.key===metric)||METRICS[0]
+  const cityFeatures=useMemo(()=>geometry?.features?.filter(f=>{
+    const id=String(f.properties?.cvegeo_ageb||f.properties?.CVEGEO||'').slice(0,13)
+    return records[id] && isCity(records[id])
+  })||[],[geometry,records])
+  const values=useMemo(()=>cityFeatures.map(f=>num(records[String(f.properties?.cvegeo_ageb||f.properties?.CVEGEO||'').slice(0,13)]?.[metric])).filter(Number.isFinite).sort((a,b)=>a-b),[cityFeatures,records,metric])
+  const lo=values[Math.floor(values.length*.05)]??0, hi=values[Math.floor(values.length*.95)]??1
 
-function MapCanvas({ selected, onSelect, metric }) {
-  const nodeRef = useRef(null)
-  const mapRef = useRef(null)
-  const layerRef = useRef(null)
+  useEffect(()=>{
+    if (!node.current || mapRef.current) return
+    const map=L.map(node.current,{zoomControl:false,attributionControl:false,minZoom:10,maxZoom:17})
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:20}).addTo(map)
+    L.control.zoom({position:'bottomright'}).addTo(map)
+    mapRef.current=map
+    return()=>{map.remove();mapRef.current=null}
+  },[])
 
-  useEffect(() => {
-    if (!nodeRef.current || mapRef.current) return
-
-    const map = L.map(nodeRef.current, {
-      center: [23.245, -106.445],
-      zoom: 12,
-      zoomControl: false,
-      attributionControl: false,
-    })
-
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      subdomains: 'abcd',
-      maxZoom: 20,
+  useEffect(()=>{
+    const map=mapRef.current
+    if(!map||!geometry)return
+    if(layerRef.current) layerRef.current.remove()
+    const fc={type:'FeatureCollection',features:cityFeatures}
+    const layer=L.geoJSON(fc,{
+      style:(feature)=>{
+        const id=String(feature?.properties?.cvegeo_ageb||feature?.properties?.CVEGEO||'').slice(0,13)
+        const active=id===selectedId
+        const value=num(records[id]?.[metric])
+        return {color:active?'#000':'#fff',weight:active?2.6:.8,fillColor:grayscale(value,lo,hi),fillOpacity:active?.92:.82}
+      },
+      onEachFeature:(feature,l)=>{
+        const id=String(feature?.properties?.cvegeo_ageb||feature?.properties?.CVEGEO||'').slice(0,13)
+        const r=records[id]
+        if(!r)return
+        l.bindTooltip(`<div class="map-tip"><span>AGEB ${id.slice(-4)}</span><strong>${metricDef.format(r[metric])}</strong><small>${metricDef.label}</small></div>`,{sticky:true,direction:'top',opacity:1})
+        l.on('click',()=>onSelect(id))
+      }
     }).addTo(map)
+    layerRef.current=layer
+    if(firstFit.current && layer.getBounds().isValid()) {map.fitBounds(layer.getBounds(),{padding:[18,18]});firstFit.current=false}
+  },[geometry,cityFeatures,records,metric,selectedId,lo,hi,metricDef,onSelect])
 
-    L.control.zoom({ position: 'bottomright' }).addTo(map)
-    mapRef.current = map
-
-    return () => {
-      map.remove()
-      mapRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map) return
-    if (layerRef.current) layerRef.current.remove()
-    const group = L.layerGroup().addTo(map)
-
-    projects.forEach((p) => {
-      const value = metric === 'Precio' ? `$${Math.round(p.priceM2 / 1000)}k`
-        : metric === 'Venta' ? `${p.medianDays}d`
-        : metric === 'Inventario' ? `${p.inventoryMonths}m`
-        : `${p.absorption.toFixed(1)}`
-      const active = selected.id === p.id
-      const icon = L.divIcon({
-        className: 'growa-marker-shell',
-        html: `<button class="growa-marker ${active ? 'is-active' : ''}" aria-label="${p.name}"><span>${value}</span><i></i></button>`,
-        iconSize: [58, 42],
-        iconAnchor: [29, 34],
-      })
-      L.marker([p.lat, p.lng], { icon }).addTo(group).on('click', () => onSelect(p))
+  useEffect(()=>{
+    if(!search||!mapRef.current||!layerRef.current)return
+    const term=search.trim().toLowerCase()
+    if(!term)return
+    let hit=null
+    layerRef.current.eachLayer(l=>{
+      const p=l.feature?.properties||{}
+      const id=String(p.cvegeo_ageb||p.CVEGEO||'').slice(0,13)
+      if(id.toLowerCase().includes(term)||id.slice(-4).toLowerCase()===term) hit={l,id}
     })
+    if(hit){onSelect(hit.id);mapRef.current.fitBounds(hit.l.getBounds(),{padding:[80,80],maxZoom:14})}
+  },[search,onSelect])
 
-    layerRef.current = group
-  }, [selected, metric, onSelect])
-
-  useEffect(() => {
-    if (!mapRef.current) return
-    mapRef.current.flyTo([selected.lat, selected.lng], 14, { duration: .7 })
-  }, [selected.id])
-
-  return <div ref={nodeRef} className="map-canvas" />
+  return <div ref={node} className="ageb-map" />
 }
 
-function Simulator({ project, onClose }) {
-  const [units, setUnits] = useState(140)
-  const [size, setSize] = useState(82)
-  const [price, setPrice] = useState(Math.round(project.priceM2 / 100) * 100)
-  const [oneBed, setOneBed] = useState(28)
-  const [twoBed, setTwoBed] = useState(58)
-  const threeBed = Math.max(0, 100 - oneBed - twoBed)
-
-  useEffect(() => setPrice(Math.round(project.priceM2 / 100) * 100), [project.id])
-
-  const baseAbsorption = project.absorption
-  const priceEffect = Math.pow(project.priceM2 / price, 1.45)
-  const mixEffect = 0.86 + ((oneBed * 1.12 + twoBed * 1.0 + threeBed * .72) / 100) * .18
-  const projectedAbsorption = Math.max(.7, baseAbsorption * priceEffect * mixEffect)
-  const sellout = Math.ceil(units / projectedAbsorption)
-  const revenue = units * size * price
-  const inventoryAfter = project.inventoryMonths + units / Math.max(project.absorption * 1.25, 1)
-  const marketFit = Math.max(42, Math.min(96, Math.round(88 - Math.abs(price - project.priceM2) / 900 - Math.abs(size - 84) / 3)))
-
-  return (
-    <div className="simulator-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <section className="simulator-panel">
-        <div className="simulator-head">
-          <div>
-            <div className="eyebrow">LABORATORIO DE PROYECTO</div>
-            <h2>Prueba el proyecto antes de lanzarlo.</h2>
-            <p>El escenario se inserta contra el mercado de <strong>{project.zone.split(' · ')[0]}</strong>.</p>
-          </div>
-          <button className="icon-button" onClick={onClose}><X size={18}/></button>
-        </div>
-
-        <div className="simulator-grid">
-          <div className="simulator-controls">
-            <Control label="Unidades" value={units} suffix="" min={40} max={320} step={5} onChange={setUnits} />
-            <Control label="Superficie media" value={size} suffix=" m²" min={45} max={160} step={1} onChange={setSize} />
-            <Control label="Precio de salida" value={price} prefix="$" suffix=" /m²" min={30000} max={90000} step={500} onChange={setPrice} moneyValue />
-
-            <div className="mix-block">
-              <div className="control-header"><span>Mezcla de producto</span><strong>{oneBed}% / {twoBed}% / {threeBed}%</strong></div>
-              <div className="mix-labels"><span>1 rec.</span><span>2 rec.</span><span>3 rec.</span></div>
-              <input type="range" min="0" max="70" value={oneBed} onChange={(e) => setOneBed(Math.min(Number(e.target.value), 100 - twoBed))} />
-              <input type="range" min="20" max="85" value={twoBed} onChange={(e) => setTwoBed(Math.min(Number(e.target.value), 100 - oneBed))} />
-            </div>
-          </div>
-
-          <div className="scenario-result">
-            <div className="scenario-kicker">ESCENARIO BASE</div>
-            <div className="scenario-number">{sellout}<span> meses</span></div>
-            <div className="scenario-caption">para colocar {units} unidades al ritmo estimado</div>
-
-            <div className="scenario-metrics">
-              <div><span>Absorción estimada</span><strong>{projectedAbsorption.toFixed(1)} u/mes</strong></div>
-              <div><span>Valor de venta</span><strong>{shortMoney(revenue)}</strong></div>
-              <div><span>Inventario zona post-lanzamiento</span><strong>{inventoryAfter.toFixed(1)} meses</strong></div>
-              <div><span>Ajuste producto–mercado</span><strong>{marketFit}/100</strong></div>
-            </div>
-
-            <div className="scenario-note">
-              <Sparkles size={16}/>
-              <p>{price > project.priceM2 * 1.06
-                ? 'El precio está por encima del rango observado. La mayor penalización del escenario viene por velocidad de absorción.'
-                : sellout < 24
-                  ? 'La mezcla propuesta cae dentro del rango de mayor movimiento del submercado y mantiene un sell-out competitivo.'
-                  : 'El proyecto es viable comercialmente, pero incrementa de forma material los meses de inventario de la zona.'}</p>
-            </div>
-          </div>
-        </div>
-      </section>
-    </div>
-  )
+function Stat({label,value,note}) {return <div className="stat"><span>{label}</span><strong>{value}</strong>{note&&<small>{note}</small>}</div>}
+function Meter({label,value}) {
+  const v=Math.max(0,Math.min(100,Number(value)||0))
+  return <div className="meter"><div><span>{label}</span><b>{pct(value)}</b></div><i><em style={{width:`${v}%`}}/></i></div>
 }
 
-function Control({ label, value, min, max, step, onChange, prefix = '', suffix = '', moneyValue = false }) {
-  return (
-    <div className="control-block">
-      <div className="control-header">
-        <span>{label}</span>
-        <strong>{prefix}{moneyValue ? Number(value).toLocaleString('es-MX') : value}{suffix}</strong>
+function AgebFicha({record,onClose}) {
+  return <div className="ficha-overlay" onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+    <article className="ficha">
+      <div className="ficha-actions"><button onClick={onClose}><X size={16}/> Cerrar</button><button className="black" onClick={()=>window.print()}><Download size={16}/> Imprimir / PDF</button></div>
+      <div className="ficha-brand"><span>G</span><strong>GROWA / INMOBILIARIA</strong><code>AGEB {String(record.cvegeo_ageb).slice(-4)}</code></div>
+      <header><small>PERFIL TERRITORIAL · CENSO 2020</small><h1>Composición demográfica</h1><p>Mazatlán, Sinaloa · {record.cvegeo_ageb}</p></header>
+      <div className="ficha-grid">
+        <Stat label="Población total" value={fmt(record.pobtot)}/><Stat label="18 años y más" value={pct(record.adult_share_pct)}/><Stat label="Ocupantes por vivienda" value={fmt(record.prom_ocup,1)}/><Stat label="Nacidos en otra entidad" value={pct(record.born_elsewhere_pct)}/>
       </div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
-      <div className="range-ends"><span>{prefix}{min.toLocaleString('es-MX')}{suffix}</span><span>{prefix}{max.toLocaleString('es-MX')}{suffix}</span></div>
-    </div>
-  )
+      <section className="ficha-section"><h3>Composición</h3>{num(record.women_share_pct)!==null&&<><Meter label="Mujeres" value={record.women_share_pct}/><Meter label="Hombres" value={record.men_share_pct}/></>}</section>
+      <section className="ficha-section"><h3>Movilidad y hogar</h3><div className="ficha-grid small"><Stat label="Residía en otra entidad en 2015" value={pct(record.interstate_2015_pct)}/><Stat label="Hogares censales" value={fmt(record.tothog)}/><Stat label="Viviendas habitadas" value={fmt(record.vivpar_hab)}/><Stat label="Promedio hijos nacidos vivos" value={fmt(record.prom_hnv,1)}/></div></section>
+      <footer>Fuente: INEGI, Censo de Población y Vivienda 2020. Variables descriptivas; no equivalen por sí solas a demanda inmobiliaria.</footer>
+    </article>
+  </div>
 }
 
-function Ficha({ project, onClose }) {
-  const probability = [
-    ['30 días', Math.max(6, Math.round(22 - project.medianDays / 11))],
-    ['90 días', Math.max(20, Math.round(68 - project.medianDays / 4))],
-    ['180 días', Math.min(92, Math.round(108 - project.medianDays / 5))],
-    ['365 días', Math.min(98, Math.round(99 - project.medianDays / 30))],
-  ]
+function Territory({data,geometry}) {
+  const [metric,setMetric]=useState('pobtot'),[selectedId,setSelectedId]=useState(null),[query,setQuery]=useState(''),[search,setSearch]=useState(''),[ficha,setFicha]=useState(false)
+  const city=useMemo(()=>Object.values(data||{}).filter(isCity),[data])
+  const selected=selectedId?data?.[selectedId]:null
+  const metricDef=METRICS.find(m=>m.key===metric)||METRICS[0]
+  const totals=useMemo(()=>({pop:city.reduce((a,r)=>a+(Number(r.pobtot)||0),0),households:city.reduce((a,r)=>a+(Number(r.tothog)||0),0),agebs:city.length}),[city])
+  const valuesFor=(key)=>city.map(r=>num(r[key])).filter(Number.isFinite)
 
-  const printFicha = () => window.print()
-
-  return (
-    <div className="ficha-backdrop">
-      <article className="ficha-sheet">
-        <div className="ficha-actions no-print">
-          <button className="secondary-button" onClick={onClose}>Cerrar</button>
-          <button className="primary-button" onClick={printFicha}><Download size={15}/> Imprimir / PDF</button>
-        </div>
-
-        <header className="ficha-header">
-          <div className="brand-lockup"><span className="brand-mark">G</span><span>GROWA / INMOBILIARIA</span></div>
-          <div className="ficha-code">FICHA · {project.id.toUpperCase()} / 09.2026</div>
-        </header>
-
-        <div className="ficha-title-row">
-          <div>
-            <div className="eyebrow">ANÁLISIS DE MERCADO · MAZATLÁN</div>
-            <h1>{project.name}</h1>
-            <p>{project.zone}</p>
-          </div>
-          <div className="ficha-score"><span>Ajuste de mercado</span><strong>{project.score}</strong><em>/100</em></div>
-        </div>
-
-        <div className="ficha-rule" />
-
-        <section className="ficha-hero-metrics">
-          <Metric label="Precio observado" value={`$${project.priceM2.toLocaleString('es-MX')}/m²`} meta={`+${project.priceM2Change}% · 12 meses`} trend="up" />
-          <Metric label="Tiempo mediano" value={`${project.medianDays} días`} meta="publicación → cierre" />
-          <Metric label="Absorción" value={`${project.absorption} u/mes`} meta="ritmo observado" />
-          <Metric label="Inventario" value={`${project.inventoryMonths} meses`} meta={project.risk} />
-        </section>
-
-        <div className="ficha-two-col">
-          <section>
-            <div className="section-title"><span>01</span><h3>LECTURA COMERCIAL</h3></div>
-            <p className="lead-copy">El mercado comparable favorece <strong>{project.bestProduct}</strong>, con ticket de mayor movimiento en <strong>{project.ticket}</strong>. La señal de inventario actual se clasifica como <strong>{project.risk.toLowerCase()}</strong>.</p>
-            <div className="ficha-mini-grid">
-              <div><span>Unidades totales</span><strong>{project.totalUnits}</strong></div>
-              <div><span>Disponibles</span><strong>{project.availableUnits}</strong></div>
-              <div><span>Vendidas</span><strong>{project.soldUnits}</strong></div>
-              <div><span>Reservadas</span><strong>{project.reservedUnits}</strong></div>
-            </div>
-          </section>
-
-          <section>
-            <div className="section-title"><span>02</span><h3>PROBABILIDAD DE VENTA</h3></div>
-            <div className="probability-list">
-              {probability.map(([period, pct]) => (
-                <div key={period}><span>{period}</span><div><i style={{width:`${pct}%`}}/></div><strong>{pct}%</strong></div>
-              ))}
-            </div>
-          </section>
-        </div>
-
-        <div className="ficha-two-col">
-          <section>
-            <div className="section-title"><span>03</span><h3>COMPRADOR</h3></div>
-            <Distribution labels={['25–34','35–44','45–54','55+']} values={project.ageMix} />
-            <div className="ficha-note"><span>Mayor incidencia</span><strong>{project.dominantBuyer} · {project.buyerOrigin}</strong></div>
-          </section>
-          <section>
-            <div className="section-title"><span>04</span><h3>PRECIO / VELOCIDAD</h3></div>
-            <div className="price-speed">
-              {[-8,-4,0,4,8].map((delta) => {
-                const p = project.priceM2 * (1 + delta/100)
-                const days = Math.round(project.medianDays * Math.pow(1 + delta/100, 3.2))
-                return <div key={delta}><span>{delta > 0 ? '+' : ''}{delta}%</span><strong>${Math.round(p/1000)}k/m²</strong><em>{days} días</em></div>
-              })}
-            </div>
-          </section>
-        </div>
-
-        <footer className="ficha-footer">
-          <span>Modelo demostrativo · datos de interfaz no contractuales</span>
-          <span>Growa · inteligencia territorial aplicada</span>
-        </footer>
-      </article>
+  return <main className="territory-page">
+    <div className="page-intro">
+      <div><span className="kicker">TERRITORIO · CENSO 2020</span><h1>Quién vive en cada zona.</h1><p>Selecciona un AGEB para entender el mercado residente: tamaño, estructura adulta, hogar y origen de la población.</p></div>
+      <div className="intro-meta"><b>{totals.agebs}</b><span>AGEB urbanas integradas</span></div>
     </div>
-  )
+    <section className="territory-workspace">
+      <div className="map-side">
+        <div className="map-controls">
+          <div className="metric-tabs">{METRICS.map(m=><button key={m.key} className={metric===m.key?'active':''} onClick={()=>setMetric(m.key)}>{m.short}</button>)}</div>
+          <form className="ageb-search" onSubmit={e=>{e.preventDefault();setSearch(query)}}><Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar AGEB"/><button>Ir</button></form>
+        </div>
+        <div className="map-frame"><AgebMap geometry={geometry} records={data} metric={metric} selectedId={selectedId} onSelect={setSelectedId} search={search}/><div className="map-legend"><span>{metricDef.label}</span><div><i className="l1"/><i className="l2"/><i className="l3"/><i className="l4"/><i className="l5"/><i className="l6"/></div><small>menor <b>→</b> mayor</small></div></div>
+        <div className="map-explainer"><Info size={14}/><span><b>{metricDef.label}.</b> {metricDef.help}</span></div>
+      </div>
+      <aside className="ageb-panel">
+        {!selected ? <div className="panel-empty">
+          <MapIcon size={24}/><span>MAZATLÁN URBANO</span><h2>Selecciona un polígono.</h2><p>La ficha de la derecha cambia con cada AGEB. El mapa sirve para comparar composición territorial, no para asumir que población equivale a compradores.</p>
+          <div className="city-summary"><Stat label="Población en AGEB integradas" value={fmt(totals.pop)}/><Stat label="Hogares censales" value={fmt(totals.households)}/></div>
+        </div> : <>
+          <div className="panel-head"><div><span>AGEB URBANA</span><h2>{String(selected.cvegeo_ageb).slice(-4)}</h2><small>{selected.cvegeo_ageb}</small></div><button className="text-button" onClick={()=>setFicha(true)}>Generar ficha</button></div>
+          <div className="panel-primary"><Stat label="Población total" value={fmt(selected.pobtot)} note={compareWord(selected.pobtot,valuesFor('pobtot'))}/><Stat label="Ocupantes por vivienda" value={fmt(selected.prom_ocup,1)} note={compareWord(selected.prom_ocup,valuesFor('prom_ocup'))}/></div>
+          <section className="panel-section"><div className="section-label">COMPOSICIÓN</div>{num(selected.women_share_pct)!==null&&<><Meter label="Mujeres" value={selected.women_share_pct}/><Meter label="Hombres" value={selected.men_share_pct}/></>}<Meter label="18 años y más" value={selected.adult_share_pct}/></section>
+          <section className="panel-section"><div className="section-label">ORIGEN Y MOVILIDAD</div><div className="detail-rows"><div><span>Nacidos en otra entidad</span><strong>{pct(selected.born_elsewhere_pct)}</strong></div><div><span>Residía en otra entidad en 2015</span><strong>{pct(selected.interstate_2015_pct)}</strong></div></div></section>
+          <section className="panel-section"><div className="section-label">HOGAR</div><div className="detail-rows"><div><span>Hogares censales</span><strong>{fmt(selected.tothog)}</strong></div><div><span>Viviendas habitadas</span><strong>{fmt(selected.vivpar_hab)}</strong></div><div><span>Promedio hijas/os nacidos vivos</span><strong>{fmt(selected.prom_hnv,1)}</strong></div></div></section>
+          <div className="panel-source">INEGI · Censo 2020 · AGEB urbana</div>
+        </>}
+      </aside>
+    </section>
+    {ficha&&selected&&<AgebFicha record={selected} onClose={()=>setFicha(false)}/>} 
+  </main>
+}
+
+function LineChart({series,valueKey='i',height=220,formatValue=(v)=>fmt(v,1)}) {
+  const vals=series.map(d=>Number(d[valueKey])).filter(Number.isFinite)
+  const min=Math.min(...vals),max=Math.max(...vals),range=max-min||1,w=900,h=height,p=26
+  const pts=series.map((d,i)=>`${p+(i/(series.length-1||1))*(w-p*2)},${p+(1-(Number(d[valueKey])-min)/range)*(h-p*2)}`).join(' ')
+  const last=series.at(-1)
+  return <div className="line-chart"><svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none"><line x1={p} y1={h-p} x2={w-p} y2={h-p} className="axis"/><line x1={p} y1={p} x2={w-p} y2={p} className="grid"/><polyline points={pts} className="chart-line" fill="none" vectorEffect="non-scaling-stroke"/></svg><div className="chart-labels"><span>{series[0]?.d}</span><strong>{last?.d} · {formatValue(last?.[valueKey])}</strong></div></div>
+}
+
+function ConstructionIndicators() {
+  const [material,setMaterial]=useState('Subíndice materiales de construcción')
+  const city=inppData.culiacan, latest=city.at(-1), mat=inppData.materials[material], ml=mat.at(-1)
+  const highlight=['Subíndice materiales de construcción','Concreto premezclado','Varilla','Cable, alambre y conductores eléctricos','Subíndice de remuneraciones','Subíndice alquiler de maquinaria y equipo']
+  return <div className="indicator-content">
+    <div className="scope-note"><Info size={16}/><p><b>Escala correcta:</b> construcción residencial usa Culiacán como referencia disponible de Sinaloa. Los materiales, remuneraciones y maquinaria son nacionales. Mazatlán no aparece como ciudad INPP en este archivo.</p></div>
+    <section className="indicator-hero">
+      <div className="hero-copy"><span>CONSTRUCCIÓN RESIDENCIAL · CULIACÁN</span><h2>{fmt(latest.i,2)}</h2><p>Índice enero 2022 = 100 · agosto 2026</p></div>
+      <Stat label="Variación anual" value={`${latest.y>=0?'+':''}${pct(latest.y,2)}`} note="ago 2026 vs ago 2025"/><Stat label="Variación mensual" value={`${latest.m>=0?'+':''}${pct(latest.m,2)}`} note="ago vs jul 2026"/><Stat label="Desde ene 2022" value={`+${pct(latest.i-100,1)}`} note="cambio acumulado del índice"/>
+    </section>
+    <section className="indicator-block"><div className="block-head"><div><span>01</span><h3>Trayectoria del costo residencial de referencia</h3></div><small>INPP · Culiacán, Sin.</small></div><LineChart series={city}/></section>
+    <section className="indicator-block material-block"><div className="block-head"><div><span>02</span><h3>Qué insumo está presionando el proyecto</h3></div><label className="select-wrap"><select value={material} onChange={e=>setMaterial(e.target.value)}>{Object.keys(inppData.materials).map(k=><option key={k}>{k}</option>)}</select><ChevronDown size={15}/></label></div>
+      <div className="material-layout"><div><div className="material-big"><span>{material}</span><strong>{fmt(ml.i,2)}</strong><small>índice · ene 2022 = 100</small></div><div className="material-deltas"><Stat label="Mensual" value={`${ml.m>=0?'+':''}${pct(ml.m,2)}`}/><Stat label="Interanual" value={`${ml.y>=0?'+':''}${pct(ml.y,2)}`}/></div></div><LineChart series={mat}/></div>
+    </section>
+    <section className="indicator-block"><div className="block-head"><div><span>03</span><h3>Presiones de costo · agosto 2026</h3></div><small>Variación interanual</small></div><div className="cost-table">{highlight.map(name=>{const l=inppData.materials[name].at(-1);return <div key={name}><span>{name.replace('Subíndice ','')}</span><div><i style={{width:`${Math.min(100,Math.max(3,Math.abs(l.y)/15*100))}%`}}/></div><strong>{l.y>=0?'+':''}{pct(l.y,1)}</strong></div>})}</div></section>
+    <div className="method-note"><b>Cómo leerlo</b><p>{inppMeta.unitNote} Sirve para seguir presión de costos, presupuestar escenarios y detectar qué componentes se están encareciendo más rápido.</p><span>Fuente: {inppMeta.source} · corte {inppMeta.updated}</span></div>
+  </div>
+}
+
+function FinancingIndicators({financing}) {
+  const [seriesKey,setSeriesKey]=useState('actions')
+  const h=financing.h1['2026'], yoy=financing.h1_2026_vs_2025
+  const cfg={actions:{label:'Acciones',format:v=>fmt(v)},amount_mxn:{label:'Monto financiado',format:v=>compactMXN(v)},avg_amount_per_action:{label:'Ticket promedio',format:v=>compactMXN(v)}}[seriesKey]
+  const ageTotal=financing.age_profile.reduce((a,d)=>a+d.actions,0)
+  const demand=financing.potential_demand
+  const maxDemand=Math.max(...demand.bands.map(d=>d.beneficiaries))
+  return <div className="indicator-content">
+    <div className="scope-note"><Landmark size={16}/><p><b>Escala municipal:</b> los financiamientos corresponden al municipio de Mazatlán. No se reparten ni estiman por AGEB.</p></div>
+    <section className="finance-hero"><div><span>H1 2026</span><h2>{fmt(h.actions)}</h2><p>acciones de financiamiento</p></div><Stat label="Monto financiado" value={compactMXN(h.amount_mxn)} note={`${yoy.amount_pct>=0?'+':''}${pct(yoy.amount_pct,1)} vs H1 2025`}/><Stat label="Ticket promedio" value={compactMXN(h.avg_amount_per_action)} note={`${yoy.avg_ticket_pct>=0?'+':''}${pct(yoy.avg_ticket_pct,1)} vs H1 2025`}/><Stat label="Acciones" value={`${yoy.actions_pct>=0?'+':''}${pct(yoy.actions_pct,1)}`} note="variación interanual H1"/></section>
+    <section className="indicator-block"><div className="block-head"><div><span>01</span><h3>Flujo mensual de financiamiento</h3></div><div className="mini-tabs">{Object.entries({actions:'Acciones',amount_mxn:'Monto',avg_amount_per_action:'Ticket'}).map(([k,l])=><button className={seriesKey===k?'active':''} onClick={()=>setSeriesKey(k)} key={k}>{l}</button>)}</div></div><LineChart series={financing.monthly} valueKey={seriesKey} formatValue={cfg.format}/></section>
+    <div className="two-blocks">
+      <section className="indicator-block"><div className="block-head"><div><span>02</span><h3>Edad de las personas financiadas</h3></div><small>acciones acumuladas del archivo</small></div><div className="horizontal-bars">{financing.age_profile.filter(d=>d.code!==null).map(d=><div key={d.label}><div><span>{d.label}</span><strong>{pct(d.actions/ageTotal*100,1)}</strong></div><i><em style={{width:`${d.actions/ageTotal*100}%`}}/></i><small>{fmt(d.actions)} acciones</small></div>)}</div></section>
+      <section className="indicator-block"><div className="block-head"><div><span>03</span><h3>Demanda potencial INFONAVIT</h3></div><small>{demand.period} · {fmt(demand.total)} beneficiarios</small></div><div className="demand-list">{demand.bands.map(d=><div key={d.label}><span>{d.label}</span><i><em style={{width:`${d.beneficiaries/maxDemand*100}%`}}/></i><strong>{fmt(d.beneficiaries)}</strong></div>)}</div></section>
+    </div>
+    <div className="method-note"><b>Para qué sirve</b><p>Permite seguir profundidad del crédito formal, ticket financiado y composición de la demanda potencial. Es contexto de mercado municipal, no una predicción de ventas de un desarrollo.</p><span>Fuente: {financing.source} · observado hasta {financing.observed_through}</span></div>
+  </div>
+}
+
+function Indicators({financing}) {
+  const [section,setSection]=useState('construction')
+  return <main className="indicators-page"><div className="page-intro indicator-intro"><div><span className="kicker">INDICADORES</span><h1>Lo que cambia la viabilidad de un proyecto.</h1><p>Costos de construcción, presión de insumos y profundidad del financiamiento. Cada indicador conserva su escala geográfica real.</p></div></div>
+    <div className="indicator-nav"><button className={section==='construction'?'active':''} onClick={()=>setSection('construction')}><Building2 size={17}/><div><strong>Construcción y economía</strong><span>INPP · materiales · mano de obra</span></div></button><button className={section==='finance'?'active':''} onClick={()=>setSection('finance')}><Landmark size={17}/><div><strong>Financiamiento</strong><span>SNIIV / SEDATU · Mazatlán</span></div></button></div>
+    {section==='construction'?<ConstructionIndicators/>:<FinancingIndicators financing={financing}/>} 
+  </main>
 }
 
 function App() {
-  const [selected, setSelected] = useState(projects[0])
-  const [metric, setMetric] = useState('Precio')
-  const [section, setSection] = useState('Mercado')
-  const [simulatorOpen, setSimulatorOpen] = useState(false)
-  const [fichaOpen, setFichaOpen] = useState(false)
-  const [query, setQuery] = useState('')
-
-  const filteredProjects = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return projects
-    return projects.filter(p => `${p.name} ${p.zone}`.toLowerCase().includes(q))
-  }, [query])
-
-  const nav = ['Mercado','Proyectos','Comprador','Producto','Simulador']
-
-  const navigate = (item) => {
-    setSection(item)
-    if (item === 'Simulador') setSimulatorOpen(true)
-  }
-
-  return (
-    <div className="app-shell">
-      <aside className="rail">
-        <div className="rail-brand">G</div>
-        <div className="rail-nav">
-          <button className="rail-button active"><Home size={17}/></button>
-          <button className="rail-button"><BarChart3 size={17}/></button>
-          <button className="rail-button"><Building2 size={17}/></button>
-          <button className="rail-button"><Users size={17}/></button>
-        </div>
-        <button className="rail-button rail-bottom"><Menu size={17}/></button>
-      </aside>
-
-      <div className="workspace">
-        <header className="topbar">
-          <div className="wordmark"><strong>GROWA</strong><span>INMOBILIARIA</span></div>
-          <nav className="topnav">
-            {nav.map(item => <button key={item} className={section === item ? 'active' : ''} onClick={() => navigate(item)}>{item}</button>)}
-          </nav>
-          <div className="top-actions">
-            <span className="data-state"><i/> DEMO DE PRODUCTO</span>
-            <button className="avatar">AM</button>
-          </div>
-        </header>
-
-        <main className="market-layout">
-          <section className="map-stage">
-            <div className="map-toolbar">
-              <div className="search-box">
-                <Search size={16}/>
-                <input value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Zona, desarrollo o corredor" />
-                <kbd>⌘ K</kbd>
-              </div>
-              <div className="metric-switch">
-                {['Precio','Absorción','Venta','Inventario'].map(item => (
-                  <button key={item} onClick={()=>setMetric(item)} className={metric === item ? 'active' : ''}>{item}</button>
-                ))}
-              </div>
-            </div>
-
-            <MapCanvas selected={selected} onSelect={setSelected} metric={metric} />
-
-            <div className="map-caption">
-              <div><span>MAZATLÁN</span><strong>Mercado vertical · septiembre 2026</strong></div>
-              <div className="legend"><i className="legend-dot dark"/> seleccionado <i className="legend-dot light"/> comparable</div>
-            </div>
-
-            <div className="floating-project-list">
-              <div className="floating-head"><span>PROYECTOS</span><em>{filteredProjects.length}</em></div>
-              {filteredProjects.slice(0,4).map(p => (
-                <button key={p.id} className={selected.id === p.id ? 'active' : ''} onClick={()=>setSelected(p)}>
-                  <div><strong>{p.name}</strong><span>{p.zone.split(' · ')[0]}</span></div>
-                  <div><strong>${Math.round(p.priceM2/1000)}k</strong><span>{p.absorption} u/mes</span></div>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <aside className="insight-panel">
-            <div className="project-context">
-              <div>
-                <div className="eyebrow">DESARROLLO SELECCIONADO</div>
-                <h1>{selected.name}</h1>
-                <p><MapPin size={13}/> {selected.zone}</p>
-              </div>
-              <button className="icon-button"><Layers3 size={17}/></button>
-            </div>
-
-            {section === 'Mercado' && <>
-              <div className="hero-stat-grid">
-                <Metric label="Precio observado" value={`$${selected.priceM2.toLocaleString('es-MX')}/m²`} meta={`↗ ${selected.priceM2Change}% · 12m`} trend="up" />
-                <Metric label="Tiempo mediano" value={`${selected.medianDays} días`} meta="publicación → cierre" />
-                <Metric label="Absorción" value={`${selected.absorption} u/mes`} meta="últimos 6 meses" />
-                <Metric label="Inventario" value={`${selected.inventoryMonths} meses`} meta={selected.risk} />
-              </div>
-
-              <section className="panel-section price-section">
-                <div className="section-heading"><div><span>PRECIO / M²</span><strong>12 meses</strong></div><button>Ver serie</button></div>
-                <Sparkline values={selected.priceHistory}/>
-                <div className="chart-foot"><span>${selected.priceHistory[0].toFixed(1)}k</span><span>HOY · ${selected.priceHistory.at(-1).toFixed(1)}k</span></div>
-              </section>
-
-              <section className="panel-section commercial-reading">
-                <div className="section-heading"><div><span>LECTURA COMERCIAL</span><strong>Señal de mercado</strong></div><div className="score-badge">{selected.score}/100</div></div>
-                <p>El producto con mejor movimiento observado es <b>{selected.bestProduct}</b>. El rango de ticket con mayor compatibilidad comercial se concentra en <b>{selected.ticket}</b>.</p>
-                <div className="reading-tags"><span>{selected.dominantBuyer}</span><span>{selected.buyerOrigin}</span><span>{selected.risk}</span></div>
-              </section>
-
-              <section className="panel-section inventory-section">
-                <div className="section-heading"><div><span>INVENTARIO</span><strong>{selected.availableUnits} disponibles de {selected.totalUnits}</strong></div><span className="mono">{selected.inventoryPct}%</span></div>
-                <div className="inventory-bar"><i style={{width:`${selected.soldUnits/selected.totalUnits*100}%`}}/><i className="reserved" style={{width:`${selected.reservedUnits/selected.totalUnits*100}%`}}/></div>
-                <div className="inventory-labels"><span>Vendidas {selected.soldUnits}</span><span>Reservadas {selected.reservedUnits}</span><span>Disponibles {selected.availableUnits}</span></div>
-              </section>
-            </>}
-
-            {section === 'Proyectos' && <section className="section-view">
-              <div className="section-view-head"><span>BENCHMARK</span><h2>Competidores directos</h2><p>No por distancia: por precio, tipología, tamaño y ritmo de venta.</p></div>
-              <div className="benchmark-list">
-                {projects.filter(p=>p.id!==selected.id).map((p,i)=><button key={p.id} onClick={()=>setSelected(p)}><span>0{i+1}</span><div><strong>{p.name}</strong><small>{p.zone}</small></div><div><strong>{Math.max(58, 92-i*11)}%</strong><small>similitud</small></div><ChevronRight size={16}/></button>)}
-              </div>
-            </section>}
-
-            {section === 'Comprador' && <section className="section-view">
-              <div className="section-view-head"><span>COMPRADOR</span><h2>Quién convierte, no quién pregunta.</h2><p>Perfil observado sobre cierres del segmento comparable.</p></div>
-              <Distribution labels={['25–34 años','35–44 años','45–54 años','55+ años']} values={selected.ageMix}/>
-              <div className="buyer-callout"><Users size={18}/><div><span>Mayor conversión</span><strong>{selected.dominantBuyer}</strong><p>{selected.buyerOrigin}</p></div></div>
-              <div className="section-heading compact"><div><span>ORIGEN DE COMPRA</span><strong>participación</strong></div></div>
-              <Distribution labels={['Mazatlán','Sinaloa','Nuevo León','CDMX','Extranjero','Otros']} values={selected.originMix}/>
-            </section>}
-
-            {section === 'Producto' && <section className="section-view">
-              <div className="section-view-head"><span>PRODUCTO</span><h2>Qué está premiando el mercado.</h2><p>Lectura combinada de velocidad, precio y competencia.</p></div>
-              <div className="product-fit-card"><div className="product-rank">01</div><div><span>Mayor ajuste</span><strong>{selected.bestProduct}</strong><p>{selected.ticket} · absorción superior al promedio del submercado</p></div><em>{selected.score}</em></div>
-              <div className="mix-visual">
-                {['1 recámara','2 recámaras','3 recámaras','Penthouse'].map((label,i)=><div key={label}><span>{label}</span><i><b style={{width:`${selected.unitMix[i]}%`}}/></i><strong>{selected.unitMix[i]}%</strong></div>)}
-              </div>
-              <div className="product-warning"><Target size={17}/><p><strong>Hueco observable:</strong> mantener ticket dentro de {selected.ticket} reduce la competencia directa frente al inventario más caro.</p></div>
-            </section>}
-
-            <div className="panel-actions">
-              <button className="secondary-button" onClick={()=>setFichaOpen(true)}>Generar ficha</button>
-              <button className="primary-button" onClick={()=>setSimulatorOpen(true)}><SlidersHorizontal size={15}/> Simular proyecto</button>
-            </div>
-          </aside>
-        </main>
-
-        <section className="market-strip">
-          <div className="strip-label"><span>PULSO DE MERCADO</span><strong>Mazatlán</strong></div>
-          <div><span>Precio medio</span><strong>${marketStats.avgPriceM2.toLocaleString('es-MX')}/m²</strong><em><ArrowUpRight size={12}/> {marketStats.yoyPrice}%</em></div>
-          <div><span>Tiempo de venta</span><strong>{marketStats.avgDays} días</strong><em>mediana</em></div>
-          <div><span>Absorción</span><strong>{marketStats.absorption} u/mes</strong><em>proyecto medio</em></div>
-          <div><span>Inventario</span><strong>{marketStats.inventoryMonths} meses</strong><em>mercado</em></div>
-          <div><span>Oferta activa</span><strong>{marketStats.activeUnits.toLocaleString('es-MX')}</strong><em>{marketStats.activeProjects} proyectos</em></div>
-          <button className="strip-expand"><Gauge size={15}/> Ver mercado completo</button>
-        </section>
-      </div>
-
-      {simulatorOpen && <Simulator project={selected} onClose={()=>{setSimulatorOpen(false); if(section==='Simulador') setSection('Mercado')}} />}
-      {fichaOpen && <Ficha project={selected} onClose={()=>setFichaOpen(false)} />}
-    </div>
-  )
+  const [page,setPageState]=useState(()=>location.hash==='#indicadores'?'indicadores':'territorio')
+  const [state,setState]=useState({loading:true,error:'',records:null,geometry:null,financing:null})
+  const setPage=(p)=>{setPageState(p);history.replaceState(null,'',p==='indicadores'?'#indicadores':'#territorio')}
+  useEffect(()=>{
+    const controller=new AbortController()
+    Promise.all([
+      fetch('/data/ageb-core.json',{signal:controller.signal}).then(r=>{if(!r.ok)throw new Error('AGEB core');return r.json()}),
+      fetch('/data/ageb-profile-extra.json',{signal:controller.signal}).then(r=>r.json()),
+      fetch('/data/ageb-geometry-2020.geojson',{signal:controller.signal}).then(r=>r.json()),
+      fetch('/data/financing-summary.json',{signal:controller.signal}).then(r=>r.json()),
+    ]).then(([core,extra,geometry,financing])=>setState({loading:false,error:'',records:derive(unpackCore(core),extra),geometry,financing})).catch(e=>{if(!controller.signal.aborted)setState(s=>({...s,loading:false,error:String(e)}))})
+    return()=>controller.abort()
+  },[])
+  return <div className="app"><Header page={page} setPage={setPage}/>{state.loading?<div className="loading"><i/> Cargando territorio e indicadores…</div>:state.error?<div className="loading error">No se pudo cargar la base territorial. {state.error}</div>:page==='territorio'?<Territory data={state.records} geometry={state.geometry}/>:<Indicators financing={state.financing}/>}</div>
 }
 
-createRoot(document.getElementById('root')).render(<App />)
+createRoot(document.getElementById('root')).render(<App/>)
