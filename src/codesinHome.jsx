@@ -191,14 +191,14 @@ function App() {
     location.hash = next === 'ageb' ? 'ageb' : next === 'indicadores' ? 'indicadores' : 'inicio'
     setPage(next)
   }
-  const badge = page==='ageb' ? 'PERFIL AGEB · 2020' : page==='indicadores' ? 'COSTOS · AGO 2026' : 'MAPA CODESIN · 13 DISTRITOS'
+  const badge = page==='ageb' ? 'PERFIL AGEB · 2020' : page==='inicio' ? 'MAPA CODESIN · 13 DISTRITOS' : ''
   return <div className="codesin-home">
-    <header className="ch-header">
+    <header className={`ch-header${page==='indicadores'?' ch-header--indicators':''}`}>
       <button type="button" className="ch-brand ch-brand--button" onClick={()=>go('inicio')}><div className="ch-brand__mark">G</div><div className="ch-brand__copy"><strong>GROWA</strong><span>INMOBILIARIA</span></div></button>
       <div className="ch-header__rule" />
       <nav className="ch-nav"><button type="button" className={page==='inicio'?'active':''} onClick={()=>go('inicio')}>Inicio</button><button type="button" className={page==='ageb'?'active':''} onClick={()=>go('ageb')}>AGEB / Demografía</button><button type="button" className={page==='indicadores'?'active':''} onClick={()=>go('indicadores')}>Indicadores</button></nav>
       <div className="ch-context"><strong>Mazatlán, Sinaloa</strong><span>PLATAFORMA TERRITORIAL INMOBILIARIA</span></div>
-      <div className="ch-badge">{badge}</div>
+      {badge?<div className="ch-badge">{badge}</div>:null}
     </header>
     {page==='ageb'?<AgebDemografia/>:page==='indicadores'?<Indicadores/>:<CodesinMapHome/>}
   </div>
