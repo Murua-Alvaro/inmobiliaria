@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import DeckGL from '@deck.gl/react'
 import { GeoJsonLayer, TextLayer } from '@deck.gl/layers'
 import AgebDemografia from './AgebDemografia.jsx'
+import Indicadores from './Indicadores.jsx'
 import './codesinHome.css'
 import './agebProfileOverrides.css'
 
@@ -179,7 +180,7 @@ function CodesinMapHome() {
 }
 
 function App() {
-  const pageFromHash = () => location.hash === '#ageb' ? 'ageb' : 'inicio'
+  const pageFromHash = () => location.hash === '#ageb' ? 'ageb' : location.hash === '#indicadores' ? 'indicadores' : 'inicio'
   const [page,setPage] = useState(pageFromHash)
   useEffect(()=>{
     const onHash=()=>setPage(pageFromHash())
@@ -187,18 +188,19 @@ function App() {
     return()=>window.removeEventListener('hashchange',onHash)
   },[])
   const go = next => {
-    location.hash = next === 'ageb' ? 'ageb' : 'inicio'
+    location.hash = next === 'ageb' ? 'ageb' : next === 'indicadores' ? 'indicadores' : 'inicio'
     setPage(next)
   }
+  const badge = page==='ageb' ? 'PERFIL AGEB · 2020' : page==='indicadores' ? 'COSTOS · AGO 2026' : 'MAPA CODESIN · 13 DISTRITOS'
   return <div className="codesin-home">
     <header className="ch-header">
       <button type="button" className="ch-brand ch-brand--button" onClick={()=>go('inicio')}><div className="ch-brand__mark">G</div><div className="ch-brand__copy"><strong>GROWA</strong><span>INMOBILIARIA</span></div></button>
       <div className="ch-header__rule" />
-      <nav className="ch-nav"><button type="button" className={page==='inicio'?'active':''} onClick={()=>go('inicio')}>Inicio</button><button type="button" className={page==='ageb'?'active':''} onClick={()=>go('ageb')}>AGEB / Demografía</button></nav>
+      <nav className="ch-nav"><button type="button" className={page==='inicio'?'active':''} onClick={()=>go('inicio')}>Inicio</button><button type="button" className={page==='ageb'?'active':''} onClick={()=>go('ageb')}>AGEB / Demografía</button><button type="button" className={page==='indicadores'?'active':''} onClick={()=>go('indicadores')}>Indicadores</button></nav>
       <div className="ch-context"><strong>Mazatlán, Sinaloa</strong><span>PLATAFORMA TERRITORIAL INMOBILIARIA</span></div>
-      <div className="ch-badge">{page==='inicio'?'MAPA CODESIN · 13 DISTRITOS':'PERFIL AGEB · 2020'}</div>
+      <div className="ch-badge">{badge}</div>
     </header>
-    {page==='ageb'?<AgebDemografia/>:<CodesinMapHome/>}
+    {page==='ageb'?<AgebDemografia/>:page==='indicadores'?<Indicadores/>:<CodesinMapHome/>}
   </div>
 }
 
