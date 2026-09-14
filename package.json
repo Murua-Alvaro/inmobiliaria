@@ -1,7 +1,7 @@
 {
   "name": "growa-inmobiliaria",
   "private": true,
-  "version": "0.5.1",
+  "version": "0.5.2",
   "type": "module",
   "scripts": {
     "dev": "node scripts/sync-territorial-data.mjs && vite --host 0.0.0.0",
@@ -9,6 +9,8 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
+    "@deck.gl/layers": "latest",
+    "@deck.gl/react": "latest",
     "@vitejs/plugin-react": "latest",
     "vite": "latest",
     "react": "latest",
