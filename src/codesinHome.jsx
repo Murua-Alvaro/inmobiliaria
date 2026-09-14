@@ -6,6 +6,7 @@ import AgebDemografia from './AgebDemografia.jsx'
 import Indicadores from './Indicadores.jsx'
 import './codesinHome.css'
 import './agebProfileOverrides.css'
+import './headerNav.css'
 
 const INITIAL_VIEW = {
   longitude: -106.424,
@@ -192,7 +193,7 @@ function App() {
     setPage(next)
   }
   const badge = page==='ageb' ? 'PERFIL AGEB · 2020' : page==='inicio' ? 'MAPA CODESIN · 13 DISTRITOS' : ''
-  return <div className="codesin-home">
+  return <div className={`codesin-home${page==='indicadores'?' codesin-home--scroll':''}`}>
     <header className={`ch-header${page==='indicadores'?' ch-header--indicators':''}`}>
       <button type="button" className="ch-brand ch-brand--button" onClick={()=>go('inicio')}><div className="ch-brand__mark">G</div><div className="ch-brand__copy"><strong>GROWA</strong><span>INMOBILIARIA</span></div></button>
       <div className="ch-header__rule" />
