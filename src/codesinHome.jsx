@@ -19,7 +19,7 @@ const INITIAL_VIEW = {
 function collectCoordinates(value, output) {
   if (!Array.isArray(value)) return
   if (value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
-    output.push([value[0], value[1])
+    output.push([value[0], value[1]])
     return
   }
   value.forEach(item => collectCoordinates(item, output))
@@ -146,14 +146,15 @@ function App() {
   },[])
   useEffect(()=>{
     const scrollable = page === 'indicadores'
+    document.documentElement.style.height = scrollable ? 'auto' : '100%'
+    document.body.style.height = scrollable ? 'auto' : '100%'
     document.documentElement.style.overflowY = scrollable ? 'auto' : 'hidden'
     document.body.style.overflowY = scrollable ? 'auto' : 'hidden'
     const root = document.getElementById('root')
-    if (root) root.style.overflowY = scrollable ? 'visible' : 'hidden'
-    return () => {
-      document.documentElement.style.overflowY = ''
-      document.body.style.overflowY = ''
-      if (root) root.style.overflowY = ''
+    if (root) {
+      root.style.height = scrollable ? 'auto' : '100%'
+      root.style.minHeight = scrollable ? '100vh' : ''
+      root.style.overflow = scrollable ? 'visible' : 'hidden'
     }
   },[page])
   const go = next => {
