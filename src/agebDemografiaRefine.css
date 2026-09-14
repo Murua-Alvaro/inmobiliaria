@@ -1,0 +1,7 @@
+.ad-coverage{display:grid;grid-template-columns:auto auto 1px auto auto;align-items:end;gap:4px 8px;border:1px solid #e1e1e1;border-radius:8px;background:#fff;min-height:56px;padding:10px 14px;box-shadow:0 5px 18px rgba(0,0,0,.025)}
+.ad-coverage>strong,.ad-coverage>span{display:block}
+.ad-coverage:before,.ad-coverage:after{content:none;display:none}
+.ad-coverage strong{font-family:Manrope,sans-serif;font-size:19px;line-height:1;font-weight:600;letter-spacing:-.035em}
+.ad-coverage span{font-family:'DM Mono',monospace;font-size:6.5px;line-height:1.15;color:#888;white-space:nowrap}
+.ad-coverage i{display:block;width:1px;height:29px;background:#dedede;margin:0 6px;align-self:center}
+@media(max-width:850px){.ad-coverage{display:none}}
