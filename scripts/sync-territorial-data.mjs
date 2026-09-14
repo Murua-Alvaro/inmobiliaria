@@ -12,6 +12,20 @@ async function copyFrom(base, remote, local = remote) {
   return body
 }
 
+async function copyOptional(base, remote, fallback, local = remote) {
+  try {
+    const response = await fetch(`${base}/${remote}`)
+    if (!response.ok) throw new Error(String(response.status))
+    const body = await response.text()
+    await writeFile(new URL(local, OUT), body)
+    return body
+  } catch {
+    const body = JSON.stringify(fallback)
+    await writeFile(new URL(local, OUT), body)
+    return body
+  }
+}
+
 async function copyUrl(url, local) {
   const response = await fetch(url)
   if (!response.ok) throw new Error(`No se pudo obtener ${local}: ${response.status}`)
@@ -21,11 +35,12 @@ async function copyUrl(url, local) {
 }
 
 await mkdir(OUT, { recursive: true })
-const [coreText,,geometryText,,codesinText] = await Promise.all([
+const [coreText,,geometryText,,,codesinText] = await Promise.all([
   copyFrom(INMO_BASE, 'ageb-core.json'),
   copyFrom(INMO_BASE, 'ageb-profile-extra.json'),
   copyFrom(INMO_BASE, 'ageb-geometry-2020.geojson'),
   copyFrom(INMO_BASE, 'financing-summary.json'),
+  copyOptional(INMO_BASE, 'developer-intelligence.json', { records: [] }),
   copyUrl(CODESIN_GEOMETRY_URL, 'codesin-districts.geojson'),
 ])
 
