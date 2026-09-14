@@ -4,6 +4,7 @@ import DeckGL from '@deck.gl/react'
 import { GeoJsonLayer, TextLayer } from '@deck.gl/layers'
 import AgebDemografia from './AgebDemografia.jsx'
 import './codesinHome.css'
+import './agebProfileOverrides.css'
 
 const INITIAL_VIEW = {
   longitude: -106.424,
@@ -195,7 +196,7 @@ function App() {
       <div className="ch-header__rule" />
       <nav className="ch-nav"><button type="button" className={page==='inicio'?'active':''} onClick={()=>go('inicio')}>Inicio</button><button type="button" className={page==='ageb'?'active':''} onClick={()=>go('ageb')}>AGEB / Demografía</button></nav>
       <div className="ch-context"><strong>Mazatlán, Sinaloa</strong><span>PLATAFORMA TERRITORIAL INMOBILIARIA</span></div>
-      <div className="ch-badge">{page==='inicio'?'MAPA CODESIN · 13 DISTRITOS':'INEGI · CENSO 2020'}</div>
+      <div className="ch-badge">{page==='inicio'?'MAPA CODESIN · 13 DISTRITOS':'PERFIL AGEB · 2020'}</div>
     </header>
     {page==='ageb'?<AgebDemografia/>:<CodesinMapHome/>}
   </div>
