@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react'
 import { indicatorsData as D } from './indicadoresData.js'
 import { allMaterials } from './materialesFull.js'
 import './indicadores.css'
+import './metricHelp.css'
 import './scrollFix.css'
 
 const fmt=(v,d=1)=>Number(v).toLocaleString('es-MX',{minimumFractionDigits:d,maximumFractionDigits:d})
@@ -37,8 +38,102 @@ function riskLevel(row){
 }
 function riskLabel(level){return level==='alta'?'alto':level==='media'?'medio':'bajo'}
 
-function Metric({label,value,note,emphasis=false}){
+function metricHelp(key,row){
+  if(!row) return null
+  const name=cleanName(row.n)
+  const level=riskLevel(row)
+  const help={
+    i:{
+      title:'Índice actual',value:fmt(row.i,2),
+      meaning:'Es el nivel relativo de la serie dentro de la escala estadística del INPP. Permite seguir la evolución del insumo en el tiempo sin confundir el índice con un precio de mercado.',
+      formula:'Índice_t = (nivel relativo en t / nivel del periodo base) × 100',
+      reading:`Para ${name}, el nivel actual es ${fmt(row.i,2)} puntos de índice. Ese número sirve como referencia estadística para calcular variaciones; no significa que el material cueste $${fmt(row.i,2)} ni que ese sea un precio por m².`,
+      use:'Sirve para construir inflación mensual, inflación anual y variaciones acumuladas de la misma serie.'
+    },
+    y:{
+      title:'Inflación 12 meses',value:signed(row.y,2),
+      meaning:'Mide cuánto cambió el índice del material respecto al mismo mes del año anterior. Es la lectura más directa del ritmo interanual de encarecimiento o abaratamiento.',
+      formula:'Inflación 12m = [(I_t / I_{t-12}) − 1] × 100',
+      reading:`El ${signed(row.y,2)} de ${name} significa que su índice actual está ${Math.abs(Number(row.y)).toLocaleString('es-MX',{maximumFractionDigits:2})}% ${Number(row.y)>=0?'por encima':'por debajo'} del nivel observado doce meses antes.`,
+      use:'Sirve para detectar si la presión de costos se está acelerando o moderando frente a un año atrás.'
+    },
+    s22:{
+      title:'Acumulado desde enero de 2022',value:signed(row.s22,2),
+      meaning:'Resume el cambio acumulado del índice desde enero de 2022 hasta el último dato disponible.',
+      formula:'Acumulado = [(I_t / I_ene2022) − 1] × 100',
+      reading:`Desde enero de 2022, ${name} acumula una variación de ${signed(row.s22,2)}. Esto mide el cambio total del índice entre ambos puntos, no la suma simple de las inflaciones mensuales.`,
+      use:'Sirve para dimensionar cuánto se ha desplazado el costo relativo de un insumo durante un horizonte de varios años.'
+    },
+    v:{
+      title:'Volatilidad 12 meses',value:`${fmt(row.v,2)} pp`,
+      meaning:'Mide qué tanto varían entre sí los movimientos mensuales recientes. Una volatilidad mayor indica una trayectoria menos estable y con cambios mensuales más dispersos.',
+      formula:'Volatilidad 12m ≈ desviación estándar de las variaciones mensuales recientes',
+      reading:`La volatilidad de ${name} es ${fmt(row.v,2)} puntos porcentuales. El valor no es una inflación adicional: describe la dispersión de sus cambios mensuales.`,
+      use:'Sirve para identificar insumos cuya trayectoria es menos predecible y que pueden requerir seguimiento de costos más frecuente.'
+    },
+    p95:{
+      title:'P95 mensual',value:signed(row.p95,2),
+      meaning:'Es el percentil 95 de los cambios mensuales observados. Funciona como una referencia de movimiento mensual alto dentro de la historia de la serie.',
+      formula:'P95 = percentil 95 de {Δ% mensual}',
+      reading:`Un P95 de ${signed(row.p95,2)} significa que aproximadamente 95% de los cambios mensuales observados quedaron en o por debajo de ese umbral y cerca de 5% lo superaron.`,
+      use:'Sirve para construir escenarios de estrés históricos sin usar únicamente el peor mes observado.'
+    },
+    up:{
+      title:'Meses con alza',value:`${fmt(row.up,1)}%`,
+      meaning:'Es la proporción de meses de la serie en los que la variación mensual fue positiva.',
+      formula:'Frecuencia de alza = (meses con Δ mensual > 0 / meses válidos) × 100',
+      reading:`En ${name}, ${fmt(row.up,1)}% de los meses observados registraron aumento. No indica cuánto subió, sino con qué frecuencia ocurrió una variación positiva.`,
+      use:'Sirve para distinguir una serie que sube frecuentemente de otra que puede subir pocas veces pero con movimientos grandes.'
+    },
+    best:{
+      title:'Mayor aumento mensual histórico',value:signed(row.best,2),
+      meaning:'Es el mayor incremento porcentual de un mes a otro registrado dentro de la cobertura disponible de la serie.',
+      formula:'Máximo histórico = max(Δ% mensual)',
+      reading:`El mayor salto mensual observado para ${name} fue ${signed(row.best,2)}. Es un extremo histórico, no un cambio esperado para el siguiente mes.`,
+      use:'Sirve como referencia de un episodio extremo de presión alcista observado en la historia disponible.'
+    },
+    worst:{
+      title:'Mayor caída mensual histórica',value:signed(row.worst,2),
+      meaning:'Es la variación mensual más baja registrada en la historia disponible de la serie.',
+      formula:'Mínimo histórico = min(Δ% mensual)',
+      reading:`La mayor caída mensual observada para ${name} fue ${signed(row.worst,2)}. Es un extremo histórico y no implica que vuelva a repetirse.`,
+      use:'Sirve para conocer el rango histórico de correcciones o caídas mensuales del insumo.'
+    },
+    coverage:{
+      title:'Cobertura de la serie',value:`${row.start} → ${row.end}`,
+      meaning:'Indica desde qué mes hasta qué mes existe información válida para calcular las métricas de esta serie.',
+      formula:'Cobertura = primera observación válida → última observación válida',
+      reading:`Para ${name}, la información utilizada cubre de ${row.start} a ${row.end}. Las métricas históricas se construyen únicamente con los datos disponibles dentro de ese intervalo.`,
+      use:'Sirve para evaluar cuánta historia respalda los extremos, percentiles y frecuencias mostrados.'
+    },
+    risk:{
+      title:`Riesgo descriptivo ${riskLabel(level)}`,value:riskLabel(level).toUpperCase(),
+      meaning:'Es una etiqueta de navegación que resume presión observada en inflación, volatilidad y P95. No es una probabilidad de pérdida, una calificación crediticia ni una predicción.',
+      formula:'Alto: inflación ≥10% o volatilidad ≥4 pp o P95 ≥5%. Medio: si no es alto y cumple inflación ≥5% o volatilidad ≥1.5 pp o P95 ≥3%. Bajo: resto de casos.',
+      reading:`${name} aparece con riesgo descriptivo ${riskLabel(level)} porque sus valores actuales son: inflación ${signed(row.y,2)}, volatilidad ${fmt(row.v,2)} pp y P95 ${signed(row.p95,2)}.`,
+      use:'Sirve para filtrar rápidamente series que muestran mayor presión o inestabilidad observada y decidir cuáles revisar con más detalle.'
+    }
+  }
+  return help[key]||null
+}
+
+function Metric({label,value,note,emphasis=false,onClick=null,active=false}){
+  if(onClick) return <button type="button" className={`ix-metric ix-metric-button${emphasis?' emphasis':''}${active?' active':''}`} onClick={onClick} aria-pressed={active}><span>{label}</span><strong>{value}</strong>{note&&<small>{note}</small>}<i className="ix-metric-hint">Ver significado</i></button>
   return <div className={`ix-metric${emphasis?' emphasis':''}`}><span>{label}</span><strong>{value}</strong>{note&&<small>{note}</small>}</div>
+}
+
+function SheetStat({label,value,note,onClick,active}){
+  return <button type="button" className={`ix-sheet-stat${active?' active':''}`} onClick={onClick} aria-pressed={active}><span>{label}</span><strong>{value}</strong><small>{note}</small><i className="ix-sheet-stat-hint">Ver significado</i></button>
+}
+
+function HelpPanel({help,onClose}){
+  if(!help) return null
+  return <section className="ix-help-panel" aria-live="polite">
+    <div className="ix-help-head"><div><span>QUÉ SIGNIFICA ESTE INDICADOR</span><h3>{help.title}</h3></div><button type="button" className="ix-help-close" onClick={onClose} aria-label="Cerrar explicación">×</button></div>
+    <div className="ix-help-value"><div><span>VALOR DE LA SERIE</span><strong>{help.value}</strong></div><div><span>LECTURA DEL VALOR</span><p>{help.reading}</p></div></div>
+    <div className="ix-help-grid"><div><span>QUÉ MIDE</span><p>{help.meaning}</p></div><div><span>CÓMO SE CALCULA</span><p className="ix-help-formula">{help.formula}</p></div><div><span>PARA QUÉ SIRVE</span><p>{help.use}</p></div></div>
+    <div className="ix-help-foot">Interpretación descriptiva construida con la serie disponible. No sustituye cotizaciones de proveedor, costos unitarios ni un presupuesto ejecutivo de obra.</div>
+  </section>
 }
 
 function TrendChart({data,mode}){
@@ -72,7 +167,7 @@ function TrendChart({data,mode}){
       {xIdx.map(i=><text key={i} x={x(i)} y={h-10} textAnchor={i===0?'start':i===data.length-1?'end':'middle'} className="ix-x-label">{shortDate(data[i]?.d)}</text>)}
       {hovered?<g><line x1={x(hover)} y1={top} x2={x(hover)} y2={h-bottom} className="ix-hover-line"/><circle cx={x(hover)} cy={y(Number(hovered[cfg.key]))} r="5" className="ix-hover-dot"/></g>:null}
     </svg>
-    <div className="ix-chart-foot"><span>{PERIODS.all.label==='Serie completa'?'Pasa el cursor para consultar un mes exacto.':''}</span>{hovered?<strong>{shortDate(hovered.d)} · {formatValue(hovered[cfg.key])}</strong>:<strong>{shortDate(data.at(-1).d)} · {formatValue(data.at(-1)[cfg.key])}</strong>}</div>
+    <div className="ix-chart-foot"><span>Pasa el cursor para consultar un mes exacto.</span>{hovered?<strong>{shortDate(hovered.d)} · {formatValue(hovered[cfg.key])}</strong>:<strong>{shortDate(data.at(-1).d)} · {formatValue(data.at(-1)[cfg.key])}</strong>}</div>
   </div>
 }
 
@@ -105,6 +200,7 @@ export default function Indicadores(){
   const [sortDirection,setSortDirection]=useState('desc')
   const [rankMetric,setRankMetric]=useState('y')
   const [rankLimit,setRankLimit]=useState(10)
+  const [activeMetric,setActiveMetric]=useState(null)
   const detailRef=useRef(null)
   const catalogRef=useRef(null)
 
@@ -134,15 +230,18 @@ export default function Indicadores(){
     })
   },[materialQuery,seriesType,riskFilter,sortBy,sortDirection])
   const ranked=useMemo(()=>[...allMaterials].sort((a,b)=>Number(b[rankMetric]||0)-Number(a[rankMetric]||0)).slice(0,rankLimit),[rankMetric,rankLimit])
+  const activeHelp=selected&&activeMetric?metricHelp(activeMetric,selected):null
 
   const selectMaterial=name=>{
     setMaterialName(name)
+    setActiveMetric(null)
     setTimeout(()=>detailRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),40)
   }
   const chooseRisk=level=>{
     setRiskFilter(current=>current===level?'all':level)
     setTimeout(()=>catalogRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),40)
   }
+  const explain=key=>setActiveMetric(current=>current===key?null:key)
 
   return <main className="ix-page">
     <section className="ix-control-deck">
@@ -166,10 +265,12 @@ export default function Indicadores(){
     </section>
 
     {selected?<section ref={detailRef} className="ix-card ix-material-sheet">
-      <div className="ix-sheet-head"><div><span>02 · FICHA DEL MATERIAL</span><h2>{cleanName(selected.n)}</h2><p>Información propia de la serie seleccionada. No se genera una comparación automática con otros insumos.</p></div><span className={`ix-risk-badge ${riskLevel(selected)}`}>Riesgo descriptivo {riskLabel(riskLevel(selected))}</span></div>
-      <div className="ix-material-focus"><Metric label="Índice actual" value={fmt(selected.i,2)} note="nivel relativo" emphasis/><Metric label="Inflación 12m" value={signed(selected.y,2)} note="ritmo actual"/><Metric label="Desde ene 2022" value={signed(selected.s22,2)} note="acumulado"/><Metric label="Volatilidad 12m" value={`${fmt(selected.v,2)} pp`} note="dispersión mensual"/><Metric label="P95 mensual" value={signed(selected.p95,2)} note="mes adverso de referencia"/></div>
-      <div className="ix-sheet-grid"><div><span>Meses con alza</span><strong>{fmt(selected.up,1)}%</strong><small>frecuencia histórica</small></div><div><span>Mejor mes histórico</span><strong>{signed(selected.best,2)}</strong><small>máximo aumento mensual</small></div><div><span>Peor mes histórico</span><strong>{signed(selected.worst,2)}</strong><small>mayor caída mensual</small></div><div><span>Cobertura</span><strong>{selected.start}</strong><small>hasta {selected.end}</small></div></div>
-      <details className="ix-sheet-method"><summary>Interpretación y metodología de esta ficha</summary><div><p><b>Inflación 12m:</b> variación porcentual frente al mismo mes del año anterior.</p><p><b>Volatilidad 12m:</b> dispersión de los movimientos mensuales recientes; valores mayores implican una trayectoria menos estable.</p><p><b>P95 mensual:</b> umbral que deja por debajo aproximadamente 95% de los cambios mensuales observados en la serie.</p><p><b>Riesgo descriptivo:</b> etiqueta de navegación construida con inflación, volatilidad y P95. No es una predicción ni una recomendación financiera.</p></div></details>
+      <div className="ix-sheet-head"><div><span>02 · FICHA DEL MATERIAL</span><h2>{cleanName(selected.n)}</h2><p>Información propia de la serie seleccionada. Pulsa cualquier indicador para entender exactamente qué significa.</p></div><button type="button" className={`ix-risk-badge ix-risk-badge-button ${riskLevel(selected)}${activeMetric==='risk'?' active':''}`} onClick={()=>explain('risk')} aria-pressed={activeMetric==='risk'}>Riesgo descriptivo {riskLabel(riskLevel(selected))}</button></div>
+      <p className="ix-sheet-instruction"><b>Interacción:</b> selecciona un dato para ver definición, fórmula, lectura del valor y utilidad.</p>
+      <div className="ix-material-focus"><Metric label="Índice actual" value={fmt(selected.i,2)} note="nivel relativo" emphasis onClick={()=>explain('i')} active={activeMetric==='i'}/><Metric label="Inflación 12m" value={signed(selected.y,2)} note="ritmo actual" onClick={()=>explain('y')} active={activeMetric==='y'}/><Metric label="Desde ene 2022" value={signed(selected.s22,2)} note="acumulado" onClick={()=>explain('s22')} active={activeMetric==='s22'}/><Metric label="Volatilidad 12m" value={`${fmt(selected.v,2)} pp`} note="dispersión mensual" onClick={()=>explain('v')} active={activeMetric==='v'}/><Metric label="P95 mensual" value={signed(selected.p95,2)} note="mes adverso de referencia" onClick={()=>explain('p95')} active={activeMetric==='p95'}/></div>
+      <div className="ix-sheet-grid"><SheetStat label="Meses con alza" value={`${fmt(selected.up,1)}%`} note="frecuencia histórica" onClick={()=>explain('up')} active={activeMetric==='up'}/><SheetStat label="Mayor aumento mensual" value={signed(selected.best,2)} note="máximo histórico mensual" onClick={()=>explain('best')} active={activeMetric==='best'}/><SheetStat label="Mayor caída mensual" value={signed(selected.worst,2)} note="mínimo histórico mensual" onClick={()=>explain('worst')} active={activeMetric==='worst'}/><SheetStat label="Cobertura" value={selected.start} note={`hasta ${selected.end}`} onClick={()=>explain('coverage')} active={activeMetric==='coverage'}/></div>
+      <HelpPanel help={activeHelp} onClose={()=>setActiveMetric(null)}/>
+      <details className="ix-sheet-method"><summary>Ver metodología completa de la ficha</summary><div><p><b>Inflación 12m:</b> variación porcentual frente al mismo mes del año anterior.</p><p><b>Volatilidad 12m:</b> dispersión de los movimientos mensuales recientes; valores mayores implican una trayectoria menos estable.</p><p><b>P95 mensual:</b> umbral que deja por debajo aproximadamente 95% de los cambios mensuales observados en la serie.</p><p><b>Riesgo descriptivo:</b> etiqueta de navegación construida con inflación, volatilidad y P95. No es una predicción ni una recomendación financiera.</p></div></details>
     </section>:<section className="ix-card ix-empty-material"><span>02 · FICHA DEL MATERIAL</span><h2>Selecciona un insumo para abrir su información.</h2><p>Puedes hacerlo desde el desplegable superior, el ranking o el catálogo.</p></section>}
 
     <section className="ix-card ix-ranking-card">
