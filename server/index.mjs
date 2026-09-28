@@ -132,36 +132,80 @@ function slugify(value){
 }
 function buildDistricts(records,agebGeometry,codesin){
   const byId=new Map(records.map(r=>[r.id,r]))
+  const districtFeatures=(codesin?.features||[]).map(feature=>({
+    feature,
+    name:String(feature?.properties?.district||'Distrito'),
+    center:centerOfGeometry(feature?.geometry),
+  }))
   const buckets=new Map()
-  for(const feature of codesin?.features||[]){
-    const name=String(feature?.properties?.district||'Distrito')
-    buckets.set(name,{name,slug:slugify(name),ageb_ids:[],declared_ageb_count:Number(feature?.properties?.ageb_count||0)})
+  for(const item of districtFeatures){
+    const existing=buckets.get(item.name)
+    if(existing){
+      existing.declared_ageb_count+=Number(item.feature?.properties?.ageb_count||0)
+      existing.features.push(item.feature)
+    }else{
+      buckets.set(item.name,{
+        name:item.name,
+        slug:slugify(item.name),
+        ageb_ids:[],
+        declared_ageb_count:Number(item.feature?.properties?.ageb_count||0),
+        features:[item.feature],
+        contained_count:0,
+        nearest_count:0,
+      })
+    }
   }
+
+  const distance2=(a,b)=>{
+    if(!a||!b)return Infinity
+    const dx=(a[0]-b[0])*Math.cos(((a[1]+b[1])/2)*Math.PI/180)
+    const dy=a[1]-b[1]
+    return dx*dx+dy*dy
+  }
+
   for(const feature of agebGeometry?.features||[]){
     const id=String(feature?.properties?.cvegeo_ageb||feature?.properties?.CVEGEO||'').slice(0,13)
     const record=byId.get(id)
     if(!record)continue
     const center=centerOfGeometry(feature.geometry)
-    const districtFeature=(codesin?.features||[]).find(d=>pointInFeature(center,d))
-    if(!districtFeature)continue
-    const name=String(districtFeature?.properties?.district||'Distrito')
-    const bucket=buckets.get(name)
-    if(bucket)bucket.ageb_ids.push(id)
+    let match=districtFeatures.find(d=>pointInFeature(center,d.feature))
+    let method='contained'
+    if(!match){
+      match=[...districtFeatures].sort((a,b)=>distance2(center,a.center)-distance2(center,b.center))[0]
+      method='nearest'
+    }
+    if(!match)continue
+    const bucket=buckets.get(match.name)
+    if(bucket){
+      bucket.ageb_ids.push(id)
+      if(method==='contained')bucket.contained_count++
+      else bucket.nearest_count++
+    }
   }
+
   return [...buckets.values()].map(d=>{
     const rows=d.ageb_ids.map(id=>byId.get(id)).filter(Boolean)
     const sum=k=>rows.reduce((a,r)=>a+(Number(r[k])||0),0)
     const avg=k=>rows.length?rows.reduce((a,r)=>a+(Number(r[k])||0),0)/rows.length:null
+    const weighted=(k,w='households')=>{
+      const den=rows.reduce((a,r)=>a+(Number(r[w])||0),0)
+      if(!den)return avg(k)
+      return rows.reduce((a,r)=>a+(Number(r[k])||0)*(Number(r[w])||0),0)/den
+    }
     return {
-      ...d,
+      name:d.name,
+      slug:d.slug,
+      ageb_ids:d.ageb_ids,
+      declared_ageb_count:d.declared_ageb_count,
       ageb_count:rows.length||d.declared_ageb_count,
       population:sum('population'),
       households:sum('households'),
       occupied_housing:sum('occupied_housing'),
-      opportunity_score:avg('opportunity_score')===null?null:Math.round(avg('opportunity_score')),
-      mobility_share:avg('recent_mobility_share'),
-      adult_share:avg('adult_share'),
-      external_origin_share:avg('external_origin_share'),
+      opportunity_score:weighted('opportunity_score')===null?null:Math.round(weighted('opportunity_score')),
+      mobility_share:weighted('recent_mobility_share'),
+      adult_share:weighted('adult_share'),
+      external_origin_share:weighted('external_origin_share'),
+      assignment:{contained:d.contained_count,nearest:d.nearest_count},
     }
   }).sort((a,b)=>(b.opportunity_score||0)-(a.opportunity_score||0))
 }
@@ -284,7 +328,8 @@ const server=http.createServer(async(req,res)=>{
         districts:state.districts.length,
         loaded_at:state.loadedAt,
         source:state.source,
-        opportunity_method:'Proxy demográfico normalizado P10–P90: población 32%, hogares 26%, adultos 14%, movilidad reciente 16%, origen externo 12%. No es avalúo ni predicción de ventas.'
+        opportunity_method:'Proxy demográfico normalizado P10–P90: población 32%, hogares 26%, adultos 14%, movilidad reciente 16%, origen externo 12%. No es avalúo ni predicción de ventas.',
+        district_method:'AGEB asignada por centro geométrico al polígono CODESIN; si el centro cae fuera por bordes/topología, se usa el distrito más cercano. Agregados distritales ponderan por hogares.'
       })
     }
     if(url.pathname==='/api/locations'){
