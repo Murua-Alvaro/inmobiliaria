@@ -3,7 +3,8 @@ import L from 'leaflet'
 import {
   Search, SlidersHorizontal, Layers3, Users, Store, Hotel, Utensils,
   Building2, MapPinned, Crosshair, Download, Plus, X, TrendingUp,
-  Home, BriefcaseBusiness, Info, ArrowUpRight, BarChart3
+  Home, BriefcaseBusiness, Info, ArrowUpRight, BarChart3, Map as MapIcon,
+  Satellite, Bookmark, Ruler, Clock3, Eye, ListFilter
 } from 'lucide-react'
 import './propertyExplorer.css'
 
@@ -11,6 +12,9 @@ const fmt = (v, d = 0) => Number.isFinite(Number(v))
   ? Number(v).toLocaleString('es-MX', { minimumFractionDigits:d, maximumFractionDigits:d })
   : '—'
 const pct = (v, d = 1) => Number.isFinite(Number(v)) ? fmt(v,d) + '%' : '—'
+const money = v => Number.isFinite(Number(v))
+  ? new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN',maximumFractionDigits:0}).format(Number(v))
+  : '—'
 const clamp = (v, a = 0, b = 100) => Math.max(a, Math.min(b, v))
 const num = v => Number.isFinite(Number(v)) ? Number(v) : 0
 const isCity = record => {
@@ -56,6 +60,7 @@ function marketFor(record, radius = '1 km') {
   const tourist = clamp(Math.round(tourism * 0.58 + business * 0.17 + serviceAccess * 0.17 + diversity * 0.08))
   const commercial = clamp(Math.round(business * 0.48 + demand * 0.18 + serviceAccess * 0.2 + diversity * 0.14))
   const mixed = clamp(Math.round(residential * 0.31 + tourist * 0.22 + commercial * 0.31 + diversity * 0.16))
+  const opportunity = clamp(Math.round(mixed * .36 + commercial * .24 + residential * .18 + tourist * .12 + Math.max(0,growth) * .1))
   const vacancy = 7 + seed(id,15) * 24
   const avgDaily = Math.round((pop * 0.72 + establishments * 12 + tourism * 23) * Math.max(0.8, Math.sqrt(f)))
 
@@ -71,37 +76,62 @@ function marketFor(record, radius = '1 km') {
   return {
     establishments, restaurants, hotels, retail, professional, health, education,
     entertainment, newBusinesses, growth, diversity, tourism, serviceAccess, demand,
-    business, residential, tourist, commercial, mixed, vacancy, avgDaily, history
+    business, residential, tourist, commercial, mixed, opportunity, vacancy, avgDaily, history
   }
 }
 
-const PROFILE = {
+function prospectsFor(record, market) {
+  if (!record || !market) return []
+  const id = String(record.cvegeo_ageb || '')
+  const types = ['Terreno','Local comercial','Uso mixto','Edificio','Terreno']
+  const labels = ['Corredor principal','Esquina comercial','Nodo de servicios','Frente urbano','Reserva de suelo']
+  return Array.from({length:5},(_,i)=>{
+    const s = seed(id,60+i)
+    const area = Math.round(420 + s*5200)
+    const priceM2 = Math.round(7200 + seed(id,80+i)*24500)
+    const score = clamp(Math.round(market.opportunity - 5 + seed(id,90+i)*12))
+    return {
+      id:id+'-'+(i+1),
+      type:types[i],
+      label:labels[i],
+      address:'AGEB '+id.slice(-4)+' · Mazatlán, Sinaloa',
+      area,
+      priceM2,
+      price:area*priceM2,
+      score,
+      tenure:Math.round(2+seed(id,100+i)*16),
+      status:i<2?'Alta afinidad':'Explorar'
+    }
+  }).sort((a,b)=>b.score-a.score)
+}
+
+const PROFILES = {
+  mixed:{label:'Uso mixto',icon:Building2,key:'mixed'},
   residential:{label:'Residencial',icon:Home,key:'residential'},
   tourist:{label:'Turístico',icon:Hotel,key:'tourist'},
-  commercial:{label:'Comercial',icon:BriefcaseBusiness,key:'commercial'},
-  mixed:{label:'Uso mixto',icon:Building2,key:'mixed'}
+  commercial:{label:'Comercial',icon:BriefcaseBusiness,key:'commercial'}
 }
 
 const LAYERS = {
-  score:{label:'Ajuste al perfil',source:'Índice demo',format:v=>fmt(v)},
+  opportunity:{label:'Opportunity Score',source:'Modelo Growa · prototipo',format:v=>fmt(v)},
   population:{label:'Población',source:'INEGI 2020',format:v=>fmt(v)},
-  denue:{label:'Establecimientos',source:'Demo DENUE',format:v=>fmt(v)},
-  tourism:{label:'Intensidad turística',source:'Índice demo',format:v=>fmt(v)},
-  growth:{label:'Crecimiento empresarial',source:'Demo DENUE',format:v=>pct(v,1)}
+  denue:{label:'Establecimientos',source:'DENUE · prototipo',format:v=>fmt(v)},
+  tourism:{label:'Intensidad turística',source:'Índice Growa · prototipo',format:v=>fmt(v)},
+  growth:{label:'Crecimiento empresarial',source:'DENUE · prototipo',format:v=>pct(v,1)}
 }
 
-function metricValue(record, market, layer, profile) {
+function metricValue(record, market, layer) {
   if (layer === 'population') return num(record.pobtot)
   if (layer === 'denue') return market.establishments
   if (layer === 'tourism') return market.tourism
   if (layer === 'growth') return market.growth
-  return market[PROFILE[profile].key]
+  return market.opportunity
 }
 
-function percentileColor(value, min, max, active) {
-  if (active) return '#123f48'
+function scaleColor(value, min, max, active) {
+  if (active) return '#0f5960'
   const t = clamp((value-min)/(max-min || 1),0,1)
-  const colors = ['#e9f5f4','#cce8e5','#99d5d0','#63bbb6','#2e928f','#17666c']
+  const colors = ['#edf7f6','#d8eeec','#b5dedb','#82c7c2','#49a8a4','#217b7d']
   return colors[Math.min(colors.length-1, Math.floor(t*colors.length))]
 }
 
@@ -111,43 +141,42 @@ function Badge({children, tone='demo'}) {
 
 function TinyTrend({history}) {
   const max = Math.max(...history.map(d=>d.value),1)
-  return <div className="reo-trend" aria-label="Evolución simulada de establecimientos">
+  return <div className="reo-trend" aria-label="Evolución de establecimientos">
     {history.map(d=><div key={d.year} className="reo-trend-col"><i style={{height:String(Math.max(8,d.value/max*100))+'%'}}/><span>{String(d.year).slice(-2)}</span></div>)}
   </div>
 }
 
-function ScoreBar({label,value,compact=false}) {
-  return <div className={'reo-scorebar ' + (compact?'compact':'')}>
-    <div><span>{label}</span><strong>{fmt(value)}</strong></div>
-    <i><em style={{width:String(clamp(value))+'%'}}/></i>
-  </div>
+function ScoreBar({label,value}) {
+  const v=clamp(num(value))
+  return <div className="reo-scorebar"><div><span>{label}</span><strong>{fmt(v)}/100</strong></div><i><em style={{width:v+'%'}}/></i></div>
 }
 
-function ExplorerMap({geometry, records, profile, layer, radius, visibleIds, selectedId, onSelect}) {
-  const node = useRef(null)
-  const mapRef = useRef(null)
-  const polygonsRef = useRef(null)
-  const markersRef = useRef(null)
-  const firstFit = useRef(true)
-  const lookupRef = useRef({})
+function FilterSection({title,children,icon:Icon=ListFilter}) {
+  return <section className="reo-filter-section">
+    <label><Icon size={13}/>{title}</label>
+    {children}
+  </section>
+}
 
-  const features = useMemo(() => (geometry?.features || []).filter(f=>{
-    const id = String(f.properties?.cvegeo_ageb || f.properties?.CVEGEO || '').slice(0,13)
-    return records[id] && isCity(records[id]) && visibleIds.has(id)
-  }),[geometry,records,visibleIds])
+function MapCanvas({geometry,records,marketById,selectedId,onSelect,layer,mapMode,showProspects}) {
+  const node=useRef(null), mapRef=useRef(null), polygonRef=useRef(null), pointsRef=useRef(null), tileRef=useRef(null), firstFit=useRef(true)
 
-  const values = useMemo(()=>features.map(f=>{
-    const id=String(f.properties?.cvegeo_ageb || f.properties?.CVEGEO || '').slice(0,13)
-    return metricValue(records[id], marketFor(records[id], radius), layer, profile)
-  }).filter(Number.isFinite).sort((a,b)=>a-b),[features,records,radius,layer,profile])
+  const cityFeatures=useMemo(()=>geometry?.features?.filter(f=>{
+    const id=String(f.properties?.cvegeo_ageb||f.properties?.CVEGEO||'').slice(0,13)
+    return records[id] && isCity(records[id])
+  })||[],[geometry,records])
 
-  const min = values[Math.floor(values.length*.04)] ?? 0
-  const max = values[Math.floor(values.length*.96)] ?? 100
+  const values=useMemo(()=>cityFeatures.map(f=>{
+    const id=String(f.properties?.cvegeo_ageb||f.properties?.CVEGEO||'').slice(0,13)
+    return metricValue(records[id],marketById[id],layer)
+  }).filter(Number.isFinite).sort((a,b)=>a-b),[cityFeatures,records,marketById,layer])
+
+  const lo=values[Math.floor(values.length*.04)]??0
+  const hi=values[Math.floor(values.length*.96)]??1
 
   useEffect(()=>{
     if (!node.current || mapRef.current) return
-    const map = L.map(node.current,{zoomControl:false,attributionControl:false,minZoom:10,maxZoom:17})
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:20}).addTo(map)
+    const map=L.map(node.current,{zoomControl:false,attributionControl:false,minZoom:10,maxZoom:18})
     L.control.zoom({position:'bottomright'}).addTo(map)
     mapRef.current=map
     return()=>{map.remove();mapRef.current=null}
@@ -155,350 +184,306 @@ function ExplorerMap({geometry, records, profile, layer, radius, visibleIds, sel
 
   useEffect(()=>{
     const map=mapRef.current
-    if(!map || !geometry) return
-    if(polygonsRef.current) polygonsRef.current.remove()
-    if(markersRef.current) markersRef.current.remove()
-    lookupRef.current={}
+    if(!map)return
+    if(tileRef.current) tileRef.current.remove()
+    const url=mapMode==='satellite'
+      ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+    tileRef.current=L.tileLayer(url,{subdomains:'abcd',maxZoom:20}).addTo(map)
+    tileRef.current.bringToBack()
+  },[mapMode])
 
-    const fc={type:'FeatureCollection',features}
-    const polygons=L.geoJSON(fc,{
+  useEffect(()=>{
+    const map=mapRef.current
+    if(!map||!geometry)return
+    if(polygonRef.current) polygonRef.current.remove()
+    if(pointsRef.current) pointsRef.current.remove()
+
+    const fc={type:'FeatureCollection',features:cityFeatures}
+    const layerGroup=L.geoJSON(fc,{
       style:(feature)=>{
-        const id=String(feature?.properties?.cvegeo_ageb || feature?.properties?.CVEGEO || '').slice(0,13)
-        const r=records[id]
-        const m=marketFor(r,radius)
-        const v=metricValue(r,m,layer,profile)
+        const id=String(feature?.properties?.cvegeo_ageb||feature?.properties?.CVEGEO||'').slice(0,13)
         const active=id===selectedId
+        const value=metricValue(records[id],marketById[id],layer)
         return {
-          color:active?'#153f48':'#ffffff',
-          weight:active?2.6:0.75,
-          fillColor:percentileColor(v,min,max,active),
-          fillOpacity:active?0.86:0.62
+          color:active?'#0b3f44':'#ffffff',
+          weight:active?2.3:.85,
+          fillColor:scaleColor(value,lo,hi,active),
+          fillOpacity:mapMode==='satellite'?(active?.72:.58):(active?.92:.82)
         }
       },
       onEachFeature:(feature,l)=>{
-        const id=String(feature?.properties?.cvegeo_ageb || feature?.properties?.CVEGEO || '').slice(0,13)
-        const r=records[id]
-        if(!r)return
-        lookupRef.current[id]=l
-        const m=marketFor(r,radius)
-        const v=metricValue(r,m,layer,profile)
-        l.bindTooltip(
-          '<div class="reo-map-tip"><small>AGEB '+id.slice(-4)+'</small><strong>'+LAYERS[layer].format(v)+'</strong><span>'+LAYERS[layer].label+'</span></div>',
-          {sticky:true,direction:'top',opacity:1}
-        )
+        const id=String(feature?.properties?.cvegeo_ageb||feature?.properties?.CVEGEO||'').slice(0,13)
+        const r=records[id], m=marketById[id]
+        if(!r||!m)return
+        const value=metricValue(r,m,layer)
+        l.bindTooltip('<div class="reo-map-tip"><small>AGEB '+id.slice(-4)+'</small><strong>'+LAYERS[layer].format(value)+'</strong><span>'+LAYERS[layer].label+'</span></div>',{sticky:true,direction:'top',opacity:1})
         l.on('click',()=>onSelect(id))
       }
     }).addTo(map)
-    polygonsRef.current=polygons
+    polygonRef.current=layerGroup
 
-    const markers=L.layerGroup()
-    polygons.eachLayer(l=>{
-      const feature=l.feature
-      const id=String(feature?.properties?.cvegeo_ageb || feature?.properties?.CVEGEO || '').slice(0,13)
-      const r=records[id]
-      if(!r || !l.getBounds) return
-      const m=marketFor(r,radius)
-      const score=m[PROFILE[profile].key]
-      const center=l.getBounds().getCenter()
-      const marker=L.circleMarker(center,{
-        radius:id===selectedId?6:4,
-        color:'#ffffff',
-        weight:1.2,
-        fillColor:id===selectedId?'#122f37':'#2d7f83',
-        fillOpacity:0.92
+    if(showProspects){
+      const pts=L.layerGroup()
+      layerGroup.eachLayer(l=>{
+        const id=String(l.feature?.properties?.cvegeo_ageb||l.feature?.properties?.CVEGEO||'').slice(0,13)
+        const m=marketById[id]
+        if(!m || m.opportunity<70)return
+        const c=l.getBounds().getCenter()
+        L.circleMarker(c,{radius:4.5,color:'#fff',weight:1.5,fillColor:'#103f48',fillOpacity:.95})
+          .bindTooltip('<div class="reo-dot-tip"><b>Oportunidad detectada</b><span>Score '+fmt(m.opportunity)+'/100 · prototipo</span></div>',{direction:'top'})
+          .on('click',()=>onSelect(id))
+          .addTo(pts)
       })
-      marker.bindTooltip('<div class="reo-dot-tip"><b>AGEB '+id.slice(-4)+'</b><span>Ajuste '+score+'/100</span></div>',{direction:'top',offset:[0,-3]})
-      marker.on('click',()=>onSelect(id))
-      marker.addTo(markers)
-    })
-    markers.addTo(map)
-    markersRef.current=markers
+      pts.addTo(map)
+      pointsRef.current=pts
+    }
 
-    if(firstFit.current && polygons.getBounds().isValid()) {
-      map.fitBounds(polygons.getBounds(),{padding:[20,20]})
+    if(firstFit.current && layerGroup.getBounds().isValid()){
+      map.fitBounds(layerGroup.getBounds(),{padding:[18,18]})
       firstFit.current=false
     }
-  },[geometry,features,records,profile,layer,radius,selectedId,onSelect,min,max])
+  },[geometry,cityFeatures,records,marketById,selectedId,layer,lo,hi,mapMode,showProspects,onSelect])
 
   useEffect(()=>{
-    const l=lookupRef.current[selectedId]
-    const map=mapRef.current
-    if(l && map && l.getBounds) map.flyToBounds(l.getBounds(),{padding:[90,90],maxZoom:14,duration:.45})
+    const group=polygonRef.current, map=mapRef.current
+    if(!group||!map||!selectedId)return
+    group.eachLayer(l=>{
+      const id=String(l.feature?.properties?.cvegeo_ageb||l.feature?.properties?.CVEGEO||'').slice(0,13)
+      if(id===selectedId) map.fitBounds(l.getBounds(),{padding:[90,90],maxZoom:14})
+    })
   },[selectedId])
 
   return <div ref={node} className="reo-map"/>
 }
 
-function Metric({label,value,badge='DEMO',real=false,icon:Icon}) {
-  return <div className="reo-metric">
-    <div className="reo-metric-top">{Icon&&<Icon size={15}/>}<span>{label}</span><Badge tone={real?'real':'demo'}>{badge}</Badge></div>
-    <strong>{value}</strong>
-  </div>
-}
-
-function CompareBlock({ids,records,radius,profile,onRemove}) {
-  if(ids.length<2) return null
-  const rows=ids.map(id=>{
-    const r=records[id],m=marketFor(r,radius)
-    return {id,r,m,score:m[PROFILE[profile].key]}
-  })
-  return <section className="reo-compare">
-    <div className="reo-section-title"><span>Comparación rápida</span><Badge>DEMO + INEGI</Badge></div>
-    <div className="reo-compare-grid">
-      {rows.map(x=><div key={x.id}>
-        <button className="reo-compare-remove" onClick={()=>onRemove(x.id)} aria-label="Quitar de comparación"><X size={12}/></button>
-        <b>AGEB {x.id.slice(-4)}</b>
-        <strong>{x.score}</strong>
-        <span>Ajuste {PROFILE[profile].label.toLowerCase()}</span>
-        <small>{fmt(x.r.pobtot)} hab. · {fmt(x.m.establishments)} establecimientos</small>
-      </div>)}
-    </div>
-  </section>
-}
-
-function DetailPanel({record, radius, profile, tab, setTab, compared, onCompare, compareIds, records, onRemoveCompare}) {
-  if(!record) return <div className="reo-detail-empty"><MapPinned size={26}/><h2>Selecciona una zona</h2><p>Haz clic en un AGEB del mapa o en un resultado para abrir su perfil territorial.</p></div>
+function ZoneDetail({record,market,profile,onSelectProperty}) {
+  if(!record||!market)return null
   const id=String(record.cvegeo_ageb)
-  const m=marketFor(record,radius)
-  const score=m[PROFILE[profile].key]
-  const profileLabel=PROFILE[profile].label
-
-  return <div className="reo-detail-content">
+  const props=prospectsFor(record,market)
+  return <>
     <div className="reo-detail-head">
-      <div><span>MAZATLÁN · AGEB URBANA</span><h2>AGEB {id.slice(-4)}</h2><small>{id}</small></div>
-      <div className="reo-score"><strong>{score}</strong><span>/100</span><small>Ajuste {profileLabel.toLowerCase()}</small></div>
+      <div><span>PERFIL DE UBICACIÓN · AGEB {id.slice(-4)}</span><h2>Mazatlán urbano</h2><small>{id} · radio analítico seleccionado</small></div>
+      <div className="reo-score"><strong>{fmt(market.opportunity)}</strong><span>/100</span><small>Opportunity Score</small></div>
     </div>
-
     <div className="reo-detail-actions">
-      <button className={compared?'active':''} onClick={onCompare}>{compared?'En comparador':'Comparar zona'} <Plus size={14}/></button>
-      <button onClick={()=>window.print()}>Ficha <Download size={14}/></button>
+      <button><Bookmark size={13}/> Guardar</button>
+      <button><Download size={13}/> Exportar</button>
+    </div>
+    <div className="reo-tabs">
+      <button className="active">Resumen</button><button>Demografía</button><button>Negocios</button><button>Turismo</button>
     </div>
 
-    <nav className="reo-tabs">
-      {['resumen','demografia','actividad','turismo'].map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t}</button>)}
-    </nav>
+    <div className="reo-kpi-grid">
+      <div className="reo-metric"><div className="reo-metric-top"><Users size={14}/><span>Población</span></div><strong>{fmt(record.pobtot)}</strong><small>INEGI 2020</small></div>
+      <div className="reo-metric"><div className="reo-metric-top"><Store size={14}/><span>Establecimientos</span></div><strong>{fmt(market.establishments)}</strong><small>prototipo territorial</small></div>
+      <div className="reo-metric"><div className="reo-metric-top"><TrendingUp size={14}/><span>Crecimiento</span></div><strong>{pct(market.growth)}</strong><small>señal 2020–2025</small></div>
+      <div className="reo-metric"><div className="reo-metric-top"><Eye size={14}/><span>Flujo diario</span></div><strong>{fmt(market.avgDaily)}</strong><small>estimación demo</small></div>
+    </div>
 
-    {tab==='resumen'&&<>
-      <div className="reo-kpi-grid">
-        <Metric icon={Users} label="Población AGEB" value={fmt(record.pobtot)} real badge="INEGI 2020"/>
-        <Metric icon={Store} label={'Establecimientos · '+radius} value={fmt(m.establishments)}/>
-        <Metric icon={TrendingUp} label="Crecimiento empresarial" value={(m.growth>=0?'+':'')+pct(m.growth)}/>
-        <Metric icon={Hotel} label="Intensidad turística" value={fmt(m.tourism)+'/100'}/>
+    <section className="reo-section">
+      <div className="reo-section-title"><span>Ajuste por estrategia</span><Badge>MODELO DEMO</Badge></div>
+      <ScoreBar label="Residencial" value={market.residential}/>
+      <ScoreBar label="Comercial" value={market.commercial}/>
+      <ScoreBar label="Turístico" value={market.tourist}/>
+      <ScoreBar label="Uso mixto" value={market.mixed}/>
+    </section>
+
+    <section className="reo-section">
+      <div className="reo-section-title"><span>Señales de mercado</span><ArrowUpRight size={13}/></div>
+      <div className="reo-signals">
+        <p><TrendingUp size={13}/><span><b>{fmt(market.newBusinesses)} aperturas potenciales</b> dentro del universo demo y crecimiento de {pct(market.growth)}.</span></p>
+        <p><Utensils size={13}/><span><b>{fmt(market.restaurants)} establecimientos de alimentos</b> y {fmt(market.hotels)} señales vinculadas con hospedaje.</span></p>
+        <p><MapPinned size={13}/><span><b>Acceso a servicios {fmt(market.serviceAccess)}/100</b> y diversidad comercial {fmt(market.diversity)}/100.</span></p>
       </div>
-      <section className="reo-section">
-        <div className="reo-section-title"><span>Compatibilidad por producto</span><Badge>MODELO DEMO</Badge></div>
-        <ScoreBar label="Residencial" value={m.residential}/>
-        <ScoreBar label="Turístico" value={m.tourist}/>
-        <ScoreBar label="Comercial" value={m.commercial}/>
-        <ScoreBar label="Uso mixto" value={m.mixed}/>
-      </section>
-      <section className="reo-section">
-        <div className="reo-section-title"><span>Lectura para desarrollo</span><Badge>INTERPRETACIÓN</Badge></div>
-        <div className="reo-signals">
-          <p><ArrowUpRight size={14}/><span><b>Demanda residente.</b> {fmt(record.tothog)} hogares censales y {fmt(record.prom_ocup,1)} ocupantes promedio por vivienda.</span></p>
-          <p><ArrowUpRight size={14}/><span><b>Actividad económica.</b> La capa demo estima {fmt(m.newBusinesses)} altas recientes y un crecimiento empresarial de {pct(m.growth)}.</span></p>
-          <p><ArrowUpRight size={14}/><span><b>Entorno turístico.</b> Intensidad {m.tourism>=70?'alta':m.tourism>=45?'media':'moderada'} con {fmt(m.hotels)} unidades de alojamiento y {fmt(m.restaurants)} establecimientos gastronómicos simulados en el contexto.</span></p>
-        </div>
-      </section>
-      <CompareBlock ids={compareIds} records={records} radius={radius} profile={profile} onRemove={onRemoveCompare}/>
-    </>}
+    </section>
 
-    {tab==='demografia'&&<>
-      <div className="reo-kpi-grid">
-        <Metric label="Población" value={fmt(record.pobtot)} real badge="INEGI 2020"/>
-        <Metric label="Hogares censales" value={fmt(record.tothog)} real badge="INEGI 2020"/>
-        <Metric label="Viviendas habitadas" value={fmt(record.vivpar_hab)} real badge="INEGI 2020"/>
-        <Metric label="Ocupantes / vivienda" value={fmt(record.prom_ocup,1)} real badge="INEGI 2020"/>
-      </div>
-      <section className="reo-section">
-        <div className="reo-section-title"><span>Perfil residente</span><Badge tone="real">INEGI 2020</Badge></div>
-        <ScoreBar label="Población adulta" value={record.adult_share_pct}/>
-        <ScoreBar label="Mujeres" value={record.women_share_pct}/>
-        <ScoreBar label="Nacidos en otra entidad" value={record.born_elsewhere_pct}/>
-        <ScoreBar label="Residía en otra entidad en 2015" value={record.interstate_2015_pct}/>
-      </section>
-      <div className="reo-note"><Info size={14}/><span>Estas variables describen residentes del AGEB. No equivalen directamente a compradores ni a absorción inmobiliaria.</span></div>
-    </>}
+    <section className="reo-section">
+      <div className="reo-section-title"><span>Actividad económica</span><small>2020–2025</small></div>
+      <TinyTrend history={market.history}/>
+      <div className="reo-trend-summary"><span>establecimientos · serie prototipo</span><b>{market.history[0].value} → {market.history.at(-1).value}</b></div>
+    </section>
 
-    {tab==='actividad'&&<>
-      <div className="reo-kpi-grid">
-        <Metric icon={Store} label="Establecimientos" value={fmt(m.establishments)}/>
-        <Metric icon={Utensils} label="Restaurantes" value={fmt(m.restaurants)}/>
-        <Metric icon={Building2} label="Comercio" value={fmt(m.retail)}/>
-        <Metric icon={BriefcaseBusiness} label="Servicios prof." value={fmt(m.professional)}/>
-      </div>
-      <section className="reo-section">
-        <div className="reo-section-title"><span>Mix económico simulado</span><Badge>DEMO DENUE</Badge></div>
-        <div className="reo-mix-grid">
-          <div><span>Salud</span><strong>{fmt(m.health)}</strong></div>
-          <div><span>Educación</span><strong>{fmt(m.education)}</strong></div>
-          <div><span>Entretenimiento</span><strong>{fmt(m.entertainment)}</strong></div>
-          <div><span>Diversidad</span><strong>{fmt(m.diversity)}/100</strong></div>
-        </div>
-      </section>
-      <section className="reo-section">
-        <div className="reo-section-title"><span>Evolución de establecimientos</span><Badge>SIMULACIÓN 2020–2025</Badge></div>
-        <TinyTrend history={m.history}/>
-        <div className="reo-trend-summary"><span>2020</span><b>{fmt(m.history[0].value)} → {fmt(m.history.at(-1).value)}</b><span>2025</span></div>
-      </section>
-    </>}
+    <section className="reo-section reo-properties">
+      <div className="reo-section-title"><span>Oportunidades detectadas</span><Badge tone="real">5 ACTIVOS</Badge></div>
+      {props.slice(0,4).map(p=><button key={p.id} onClick={()=>onSelectProperty(p)}>
+        <div><b>{p.label}</b><span>{p.type} · {fmt(p.area)} m²</span></div>
+        <strong>{p.score}</strong>
+        <ArrowUpRight size={13}/>
+      </button>)}
+    </section>
 
-    {tab==='turismo'&&<>
-      <div className="reo-kpi-grid">
-        <Metric icon={Hotel} label="Alojamiento" value={fmt(m.hotels)}/>
-        <Metric icon={Utensils} label="Gastronomía" value={fmt(m.restaurants)}/>
-        <Metric icon={BarChart3} label="Índice turístico" value={fmt(m.tourism)+'/100'}/>
-        <Metric icon={Users} label="Población diaria" value={fmt(m.avgDaily)} badge="DEMO"/>
-      </div>
-      <section className="reo-section">
-        <div className="reo-section-title"><span>Señales territoriales</span><Badge>DEMO</Badge></div>
-        <ScoreBar label="Intensidad turística" value={m.tourism}/>
-        <ScoreBar label="Acceso a servicios" value={m.serviceAccess}/>
-        <ScoreBar label="Diversidad económica" value={m.diversity}/>
-        <ScoreBar label="Demanda residente" value={m.demand}/>
-      </section>
-      <div className="reo-note"><Info size={14}/><span>La intensidad turística es un indicador demostrativo. En producción se calcularía con DENUE real, inventario hotelero y las series municipales de turismo conectadas a la base.</span></div>
-    </>}
-
-    <footer className="reo-provenance">
-      <b>Proveniencia</b>
-      <span><i className="real"/> Demografía: INEGI Censo 2020</span>
-      <span><i className="demo"/> Actividad, turismo e índices: datos simulados para prototipo</span>
-    </footer>
-  </div>
+    <div className="reo-note"><Info size={13}/><span>Interfaz de prototipo. Demografía proviene de INEGI; indicadores de negocio, oportunidades y activos mostrados aquí se presentan como simulación visual hasta conectar las fuentes inmobiliarias definitivas.</span></div>
+  </>
 }
 
-export default function PropertyExplorer({records,geometry}) {
+function PropertyDetail({property,record,market,onBack}) {
+  if(!property)return null
+  return <>
+    <div className="reo-property-back"><button onClick={onBack}>← Volver a ubicación</button><Badge>ACTIVO SIMULADO</Badge></div>
+    <div className="reo-detail-head reo-property-head">
+      <div><span>{property.type.toUpperCase()}</span><h2>{property.label}</h2><small>{property.address}</small></div>
+      <div className="reo-score"><strong>{property.score}</strong><span>/100</span><small>afinidad</small></div>
+    </div>
+    <div className="reo-property-value"><span>Valor de referencia</span><strong>{money(property.price)}</strong><small>{money(property.priceM2)} / m²</small></div>
+    <div className="reo-detail-actions">
+      <button><Bookmark size={13}/> Guardar activo</button>
+      <button className="primary"><Plus size={13}/> Crear prospecto</button>
+    </div>
+    <div className="reo-tabs"><button className="active">Resumen</button><button>Propiedad</button><button>Mercado</button><button>Ubicación</button></div>
+
+    <div className="reo-kpi-grid">
+      <div className="reo-metric"><div className="reo-metric-top"><Ruler size={14}/><span>Superficie</span></div><strong>{fmt(property.area)} m²</strong><small>simulada</small></div>
+      <div className="reo-metric"><div className="reo-metric-top"><Building2 size={14}/><span>Tipo</span></div><strong className="small-value">{property.type}</strong><small>clasificación demo</small></div>
+      <div className="reo-metric"><div className="reo-metric-top"><Clock3 size={14}/><span>Tenencia</span></div><strong>{property.tenure} años</strong><small>simulada</small></div>
+      <div className="reo-metric"><div className="reo-metric-top"><BarChart3 size={14}/><span>Zona</span></div><strong>{fmt(market?.opportunity)}/100</strong><small>Opportunity Score</small></div>
+    </div>
+
+    <section className="reo-section">
+      <div className="reo-section-title"><span>Contexto Growa</span><Badge tone="real">TERRITORIO</Badge></div>
+      <ScoreBar label="Demanda residencial" value={market?.demand}/>
+      <ScoreBar label="Actividad comercial" value={market?.business}/>
+      <ScoreBar label="Intensidad turística" value={market?.tourism}/>
+      <ScoreBar label="Acceso a servicios" value={market?.serviceAccess}/>
+    </section>
+
+    <section className="reo-section">
+      <div className="reo-section-title"><span>Mercado inmediato</span></div>
+      <div className="reo-mix-grid">
+        <div><span>Población</span><strong>{fmt(record?.pobtot)}</strong></div>
+        <div><span>Establecimientos</span><strong>{fmt(market?.establishments)}</strong></div>
+        <div><span>Restaurantes</span><strong>{fmt(market?.restaurants)}</strong></div>
+        <div><span>Hoteles / hospedaje</span><strong>{fmt(market?.hotels)}</strong></div>
+      </div>
+    </section>
+
+    <section className="reo-section">
+      <div className="reo-section-title"><span>Propietario y contacto</span><Badge>PRÓXIMA CAPA</Badge></div>
+      <div className="reo-owner-placeholder">
+        <Building2 size={18}/><div><b>Resolución de propietario</b><span>Este bloque quedará conectado a registros de propiedad, estructura corporativa y datos de contacto cuando integremos la fuente correspondiente.</span></div>
+      </div>
+    </section>
+
+    <div className="reo-note"><Info size={13}/><span>El activo y los valores inmobiliarios son simulados para diseñar el flujo Reonomy → análisis Growa. No deben interpretarse como una oferta, avalúo ni propiedad real.</span></div>
+  </>
+}
+
+export default function PropertyExplorer({records,geometry,mode='explorar'}) {
+  const [query,setQuery]=useState('')
+  const [layer,setLayer]=useState('opportunity')
   const [profile,setProfile]=useState('mixed')
-  const [layer,setLayer]=useState('score')
   const [radius,setRadius]=useState('1 km')
   const [selectedId,setSelectedId]=useState(null)
-  const [tab,setTab]=useState('resumen')
-  const [query,setQuery]=useState('')
-  const [minPop,setMinPop]=useState(0)
-  const [minBiz,setMinBiz]=useState(0)
-  const [minTourism,setMinTourism]=useState(0)
-  const [compareIds,setCompareIds]=useState([])
+  const [selectedProperty,setSelectedProperty]=useState(null)
+  const [minScore,setMinScore]=useState(0)
+  const [growthFilter,setGrowthFilter]=useState('all')
+  const [mapMode,setMapMode]=useState('map')
+  const [showProspects,setShowProspects]=useState(true)
 
-  const city = useMemo(()=>Object.values(records||{}).filter(isCity),[records])
+  const city=useMemo(()=>Object.values(records||{}).filter(isCity),[records])
+  const marketById=useMemo(()=>{
+    const out={}
+    city.forEach(r=>{out[String(r.cvegeo_ageb)]=marketFor(r,radius)})
+    return out
+  },[city,radius])
 
-  const ranked = useMemo(()=>city.map(r=>{
-    const m=marketFor(r,radius)
-    const score=m[PROFILE[profile].key]
-    return {id:String(r.cvegeo_ageb),record:r,market:m,score}
-  }).filter(x=>num(x.record.pobtot)>=minPop && x.market.establishments>=minBiz && x.market.tourism>=minTourism)
-    .sort((a,b)=>b.score-a.score),[city,radius,profile,minPop,minBiz,minTourism])
-
-  const visibleIds=useMemo(()=>new Set(ranked.map(x=>x.id)),[ranked])
-  const selected=selectedId ? records?.[selectedId] : null
+  const ranked=useMemo(()=>{
+    const q=query.trim().toLowerCase()
+    return city.map(r=>{
+      const id=String(r.cvegeo_ageb)
+      const m=marketById[id]
+      return {r,m,id,score:m?.[PROFILES[profile].key] ?? m?.opportunity ?? 0}
+    }).filter(x=>{
+      const queryOk=!q || x.id.toLowerCase().includes(q) || x.id.slice(-4).includes(q)
+      const scoreOk=(x.m?.opportunity||0)>=minScore
+      const growthOk=growthFilter==='all' || (growthFilter==='positive' ? x.m.growth>0 : x.m.growth>=15)
+      return queryOk && scoreOk && growthOk
+    }).sort((a,b)=>b.score-a.score)
+  },[city,marketById,profile,query,minScore,growthFilter])
 
   useEffect(()=>{
-    if(!ranked.length){setSelectedId(null);return}
-    if(!selectedId || !visibleIds.has(selectedId)) setSelectedId(ranked[0].id)
-  },[ranked,selectedId,visibleIds])
+    if(!selectedId && ranked.length) setSelectedId(ranked[0].id)
+  },[ranked,selectedId])
 
-  const submitSearch=e=>{
-    e.preventDefault()
-    const term=query.trim().toLowerCase()
-    if(!term)return
-    const hit=city.find(r=>{
-      const id=String(r.cvegeo_ageb)
-      return id.toLowerCase().includes(term) || id.slice(-4).toLowerCase()===term
-    })
-    if(hit){setSelectedId(String(hit.cvegeo_ageb));setTab('resumen')}
-  }
+  useEffect(()=>{setSelectedProperty(null)},[selectedId,radius])
 
-  const toggleCompare=id=>{
-    setCompareIds(prev=>{
-      if(prev.includes(id)) return prev.filter(x=>x!==id)
-      if(prev.length<2) return [...prev,id]
-      return [prev[1],id]
-    })
-  }
+  const selected=selectedId?records?.[selectedId]:null
+  const market=selectedId?marketById[selectedId]:null
+  const layerValues=ranked.map(x=>metricValue(x.r,x.m,layer))
+  const layerMin=Math.min(...layerValues,0), layerMax=Math.max(...layerValues,100)
+  const modeLabel={explorar:'Explorar mercado',propiedades:'Propiedades',prospectos:'Prospectos',reportes:'Reportes'}[mode]||'Explorar mercado'
+
+  const selectZone=id=>{setSelectedId(id);setSelectedProperty(null)}
 
   return <main className="reo-page">
-    <div className="reo-demo-banner"><span>PROTOTIPO FUNCIONAL</span><p>Demografía real de INEGI + DENUE, turismo e índices simulados para probar el flujo de decisión inmobiliaria.</p></div>
+    <div className="reo-workbar">
+      <div><span>GROWA INMOBILIARIO</span><b>/</b><strong>{modeLabel}</strong></div>
+      <div className="reo-workbar-actions"><Badge tone="real">MAZATLÁN</Badge><span>Prototipo de producto · interfaz 01</span></div>
+    </div>
+
     <div className="reo-shell">
       <aside className="reo-filter">
-        <div className="reo-filter-head"><SlidersHorizontal size={16}/><div><strong>Explorar mercado</strong><span>Mazatlán, Sinaloa</span></div></div>
+        <div className="reo-filter-head"><SlidersHorizontal size={16}/><div><strong>Buscar oportunidades</strong><span>Zonas, activos y señales</span></div></div>
 
-        <form className="reo-search" onSubmit={submitSearch}>
-          <Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar AGEB, ej. 1234"/><button>Ir</button>
-        </form>
+        <div className="reo-search">
+          <Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Dirección, colonia, AGEB o activo"/><button>Buscar</button>
+        </div>
 
-        <section className="reo-filter-section">
-          <label>Perfil del proyecto</label>
-          <div className="reo-profile-grid">
-            {Object.entries(PROFILE).map(([key,p])=>{
-              const Icon=p.icon
-              return <button key={key} className={profile===key?'active':''} onClick={()=>setProfile(key)}><Icon size={15}/><span>{p.label}</span></button>
-            })}
-          </div>
-        </section>
+        <div className="reo-search-scope"><button className="active">Todo</button><button>Zonas</button><button>Propiedades</button></div>
 
-        <section className="reo-filter-section">
-          <label><Layers3 size={13}/> Capa del mapa</label>
-          <select value={layer} onChange={e=>setLayer(e.target.value)}>
-            {Object.entries(LAYERS).map(([k,v])=><option value={k} key={k}>{v.label}</option>)}
-          </select>
-          <div className="reo-layer-source">{LAYERS[layer].source}</div>
-        </section>
+        <FilterSection title="Estrategia" icon={Layers3}>
+          <div className="reo-profile-grid">{Object.entries(PROFILES).map(([key,p])=>{
+            const Icon=p.icon
+            return <button key={key} className={profile===key?'active':''} onClick={()=>setProfile(key)}><Icon size={14}/><span>{p.label}</span></button>
+          })}</div>
+        </FilterSection>
 
-        <section className="reo-filter-section">
-          <label><Crosshair size={13}/> Contexto alrededor</label>
-          <div className="reo-radius">
-            {Object.keys(radiusFactor).map(r=><button key={r} className={radius===r?'active':''} onClick={()=>setRadius(r)}>{r}</button>)}
-          </div>
-          <small>Los conteos demo de actividad y turismo cambian con el radio.</small>
-        </section>
+        <FilterSection title="Radio de mercado" icon={Crosshair}>
+          <div className="reo-radius">{Object.keys(radiusFactor).map(r=><button key={r} className={radius===r?'active':''} onClick={()=>setRadius(r)}>{r}</button>)}</div>
+        </FilterSection>
 
-        <section className="reo-filter-section">
-          <label>Filtros mínimos</label>
-          <div className="reo-filter-row"><span>Población AGEB</span><select value={minPop} onChange={e=>setMinPop(Number(e.target.value))}><option value="0">Cualquiera</option><option value="2000">2,000+</option><option value="5000">5,000+</option><option value="8000">8,000+</option></select></div>
-          <div className="reo-filter-row"><span>Establecimientos</span><select value={minBiz} onChange={e=>setMinBiz(Number(e.target.value))}><option value="0">Cualquiera</option><option value="75">75+</option><option value="150">150+</option><option value="250">250+</option></select></div>
-          <div className="reo-filter-row"><span>Intensidad turística</span><select value={minTourism} onChange={e=>setMinTourism(Number(e.target.value))}><option value="0">Cualquiera</option><option value="40">40+</option><option value="60">60+</option><option value="75">75+</option></select></div>
-        </section>
+        <FilterSection title="Filtros de oportunidad">
+          <div className="reo-filter-row"><span>Opportunity Score</span><select value={minScore} onChange={e=>setMinScore(Number(e.target.value))}><option value="0">Todos</option><option value="60">60+</option><option value="70">70+</option><option value="80">80+</option></select></div>
+          <div className="reo-filter-row"><span>Crecimiento</span><select value={growthFilter} onChange={e=>setGrowthFilter(e.target.value)}><option value="all">Cualquiera</option><option value="positive">Positivo</option><option value="high">15%+</option></select></div>
+          <div className="reo-filter-row"><span>Tipo de activo</span><select><option>Todos</option><option>Terreno</option><option>Comercial</option><option>Uso mixto</option></select></div>
+          <div className="reo-filter-row"><span>Precio / m²</span><select><option>Sin límite</option><option>&lt; $10 mil</option><option>$10–20 mil</option><option>$20 mil+</option></select></div>
+        </FilterSection>
 
-        <section className="reo-results">
-          <div className="reo-results-head"><div><strong>{fmt(ranked.length)}</strong><span>zonas encontradas</span></div><Badge>DEMO</Badge></div>
+        <div className="reo-results">
+          <div className="reo-results-head"><div><strong>{fmt(ranked.length)}</strong><span>zonas encontradas</span></div><button title="Ordenar"><ListFilter size={14}/></button></div>
           <div className="reo-results-list">
-            {ranked.slice(0,12).map((x,i)=><button key={x.id} className={selectedId===x.id?'active':''} onClick={()=>{setSelectedId(x.id);setTab('resumen')}}>
+            {ranked.slice(0,14).map((x,i)=><button key={x.id} className={selectedId===x.id?'active':''} onClick={()=>selectZone(x.id)}>
               <span className="reo-rank">{String(i+1).padStart(2,'0')}</span>
-              <div><b>AGEB {x.id.slice(-4)}</b><small>{fmt(x.record.pobtot)} hab. · {fmt(x.market.establishments)} estab.</small></div>
-              <strong>{x.score}</strong>
+              <div><b>AGEB {x.id.slice(-4)}</b><small>{fmt(x.r.pobtot)} hab. · {fmt(x.m.establishments)} establecimientos</small></div>
+              <strong>{fmt(x.score)}</strong>
             </button>)}
-            {!ranked.length&&<div className="reo-no-results">No hay zonas que cumplan los filtros.</div>}
+            {!ranked.length&&<div className="reo-no-results">No hay zonas con estos filtros.</div>}
           </div>
-        </section>
+        </div>
       </aside>
 
       <section className="reo-map-zone">
         <div className="reo-map-toolbar">
-          <div><MapPinned size={14}/><strong>Visor de oportunidad</strong><span>{PROFILE[profile].label}</span></div>
-          <div className="reo-map-tags"><Badge tone="real">CENSO REAL</Badge><Badge>CAPAS DEMO</Badge></div>
+          <div className="reo-map-switch">
+            <button className={mapMode==='map'?'active':''} onClick={()=>setMapMode('map')}><MapIcon size={13}/> Mapa</button>
+            <button className={mapMode==='satellite'?'active':''} onClick={()=>setMapMode('satellite')}><Satellite size={13}/> Satélite</button>
+            <i/>
+            <button className="active">AGEB</button>
+            <button className={showProspects?'active':''} onClick={()=>setShowProspects(v=>!v)}>Predios</button>
+          </div>
+          <div className="reo-layer-select"><span>Visualizar por</span><select value={layer} onChange={e=>setLayer(e.target.value)}>{Object.entries(LAYERS).map(([k,l])=><option key={k} value={k}>{l.label}</option>)}</select></div>
         </div>
-        <ExplorerMap geometry={geometry} records={records} profile={profile} layer={layer} radius={radius} visibleIds={visibleIds} selectedId={selectedId} onSelect={id=>{setSelectedId(id);setTab('resumen')}}/>
-        <div className="reo-map-legend">
-          <span>{LAYERS[layer].label}</span>
-          <div><i/><i/><i/><i/><i/><i/></div>
-          <small><b>menor</b><b>mayor</b></small>
-        </div>
-        <div className="reo-map-count">{fmt(ranked.length)} AGEB visibles</div>
+        <MapCanvas geometry={geometry} records={records} marketById={marketById} selectedId={selectedId} onSelect={selectZone} layer={layer} mapMode={mapMode} showProspects={showProspects}/>
+        <div className="reo-map-legend"><span>{LAYERS[layer].label}</span><div><i/><i/><i/><i/><i/><i/></div><small><b>{LAYERS[layer].format(layerMin)}</b><b>{LAYERS[layer].format(layerMax)}</b></small><em>{LAYERS[layer].source}</em></div>
+        <div className="reo-map-count">{fmt(city.length)} AGEB · {showProspects?'oportunidades visibles':'sin predios'}</div>
       </section>
 
       <aside className="reo-detail">
-        <DetailPanel
-          record={selected}
-          radius={radius}
-          profile={profile}
-          tab={tab}
-          setTab={setTab}
-          compared={selectedId?compareIds.includes(selectedId):false}
-          onCompare={()=>selectedId&&toggleCompare(selectedId)}
-          compareIds={compareIds}
-          records={records}
-          onRemoveCompare={id=>setCompareIds(prev=>prev.filter(x=>x!==id))}
-        />
+        {selectedProperty
+          ? <PropertyDetail property={selectedProperty} record={selected} market={market} onBack={()=>setSelectedProperty(null)}/>
+          : selected
+            ? <ZoneDetail record={selected} market={market} profile={profile} onSelectProperty={setSelectedProperty}/>
+            : <div className="reo-detail-empty"><MapPinned size={26}/><span>INTELIGENCIA DE UBICACIÓN</span><h2>Selecciona una zona.</h2><p>El panel combina demografía, actividad económica, turismo y señales inmobiliarias en un solo flujo de trabajo.</p></div>}
       </aside>
     </div>
   </main>
