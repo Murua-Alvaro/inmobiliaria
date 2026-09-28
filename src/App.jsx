@@ -236,11 +236,13 @@ function Locations(){
   useEffect(()=>{
     let active=true
     const t=setTimeout(()=>{
-      if(mode==='ageb')searchLocations(q,60).then(r=>active&&setRows(r.rows||[]))
-      else getDistricts(q).then(r=>active&&setDistricts(r.rows||[]))
+      if(mode==='ageb'){
+        const request=q.trim()?searchLocations(q,60):getRankings(metric,60)
+        request.then(r=>active&&setRows(r.rows||[]))
+      } else getDistricts(q).then(r=>active&&setDistricts(r.rows||[]))
     },120)
     return()=>{active=false;clearTimeout(t)}
-  },[q,mode])
+  },[q,mode,metric])
 
   const toggle=id=>setCompare(prev=>prev.includes(id)?prev.filter(x=>x!==id):prev.length>=3?prev:[...prev,id])
   const count=mode==='ageb'?rows.length:districts.length
