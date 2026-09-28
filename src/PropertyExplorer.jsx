@@ -101,55 +101,98 @@ function PlatformMega(){
 function Atlas({records}){
   const [query,setQuery]=useState('')
   const [scoreKey,setScoreKey]=useState('walk')
+  const [market,setMarket]=useState('mazatlan')
+
   const ranked=useMemo(()=>{
-    return Object.values(records||{}).filter(isCity).map(r=>{
+    const all=Object.values(records||{}).filter(isCity).map(r=>{
       const id=String(r.cvegeo_ageb)
       const salt=scoreTabs.findIndex(x=>x.k===scoreKey)
-      return {id,score:scoreFor(r,salt),pop:Number(r.pobtot||0)}
-    }).sort((a,b)=>b.score-a.score).slice(0,10)
+      return {
+        id,
+        score:scoreFor(r,salt),
+        pop:Number(r.pobtot||0),
+        label:'AGEB '+id.slice(-4)
+      }
+    }).sort((a,b)=>b.score-a.score)
+    return all.slice(0,10)
   },[records,scoreKey])
-  const filtered=ranked.filter(x=>!query.trim()||x.id.includes(query.trim()))
+
+  const filtered=ranked.filter(x=>!query.trim() || x.id.includes(query.trim()) || x.label.toLowerCase().includes(query.trim().toLowerCase()))
   const tab=scoreTabs.find(x=>x.k===scoreKey)||scoreTabs[0]
+  const TabIcon=tab.icon
+
   return <section className="ll-atlas-page">
     <div className="ll-hero">
-      <div className="ll-map-lines">
-        {Array.from({length:16},(_,i)=><i key={i} className={'l'+(i+1)}/>)}
+      <div className="ll-city-map" aria-hidden="true">
+        <span className="road r1"/><span className="road r2"/><span className="road r3"/><span className="road r4"/>
+        <span className="road r5"/><span className="road r6"/><span className="road r7"/><span className="road r8"/>
+        <span className="road r9"/><span className="road r10"/><span className="road r11"/><span className="road r12"/>
+        <i className="block b1"/><i className="block b2"/><i className="block b3"/><i className="block b4"/><i className="block b5"/>
       </div>
+
       <div className="ll-hero-copy">
+        <span className="ll-eyebrow">GROWA · LOCATION INTELLIGENCE</span>
         <h1>Insights Atlas</h1>
         <p>Obtén inteligencia de ubicación para cualquier dirección, colonia, AGEB o zona de Mazatlán.</p>
+
         <div className="ll-search-row">
-          <label><MapPin size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar una dirección, colonia, AGEB o zona"/></label>
+          <label>
+            <MapPin size={15}/>
+            <input
+              value={query}
+              onChange={e=>setQuery(e.target.value)}
+              placeholder="Buscar una dirección, colonia, AGEB o zona"
+            />
+          </label>
           <button><Search size={14}/> Obtener insights</button>
         </div>
       </div>
     </div>
+
     <div className="ll-ranking">
       <div className="ll-ranking-top">
         <h2>Top 10 Zonas</h2>
-        <div className="ll-country-toggle"><button className="active">Mazatlán</button><button>Mercado urbano</button></div>
-        <button className="ll-add">+ Añadir tu zona</button>
+
+        <div className="ll-country-toggle">
+          <button className={market==='mazatlan'?'active':''} onClick={()=>setMarket('mazatlan')}>Mazatlán</button>
+          <button className={market==='metro'?'active':''} onClick={()=>setMarket('metro')}>Mercado urbano</button>
+        </div>
+
+        <div className="ll-ranking-actions">
+          <button className="ll-add">+ Añadir tu zona</button>
+          <button className="ll-learn">Más información <ArrowRight size={11}/></button>
+        </div>
       </div>
+
       <div className="ll-score-tabs">
-        {scoreTabs.map(({k,label,icon:Icon})=><button key={k} className={scoreKey===k?'active':''} onClick={()=>setScoreKey(k)}><Icon size={11}/>{label}</button>)}
+        {scoreTabs.map(({k,label,icon:Icon})=><button
+          key={k}
+          className={scoreKey===k?'active':''}
+          onClick={()=>setScoreKey(k)}
+        ><Icon size={11}/>{label}</button>)}
       </div>
+
       <div className="ll-ranking-grid">
         {filtered.map((x,i)=><button className="ll-ranking-row" key={x.id}>
           <span className="rank">{i+1}</span>
-          <div><strong>AGEB {x.id.slice(-4)}</strong><small>Mazatlán, Sinaloa</small></div>
-          <span className="metric"><tab.icon size={11}/>{tab.label}</span>
+          <div className="place">
+            <strong>{x.label}</strong>
+            <small>Mazatlán, Sinaloa</small>
+          </div>
+          <span className="metric"><TabIcon size={11}/>{tab.label}</span>
           <b>{fmt(x.score,1)}</b>
         </button>)}
       </div>
+
+      {!filtered.length && <div className="ll-empty-search">No encontramos una zona con ese criterio.</div>}
     </div>
   </section>
 }
 
 export default function PropertyExplorer({records,mode='explorar'}){
   return <main className="ll-root">
-    {mode==='platform'?<PlatformMega/>:<Atlas records={records}/>}
-    <footer className="ll-footer-mini">
-      <Database size={16}/><div><strong>Growa Location Intelligence</strong><span>Datos territoriales, mercado e inteligencia inmobiliaria.</span></div>
-    </footer>
+    {mode==='platform'
+      ? <><PlatformMega/><footer className="ll-footer-mini"><Database size={16}/><div><strong>Growa Location Intelligence</strong><span>Datos territoriales, mercado e inteligencia inmobiliaria.</span></div></footer></>
+      : <Atlas records={records}/>}
   </main>
 }
