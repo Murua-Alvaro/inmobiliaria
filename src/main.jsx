@@ -72,14 +72,14 @@ function compareWord(value, values) {
 
 function Header({page,setPage}) {
   return <>
-    <div className="ll-announcement">Growa Location Intelligence · inteligencia territorial e inmobiliaria para Mazatlán <button onClick={()=>setPage('explorar')}>Conocer más</button></div>
+    <div className="ll-announcement">Growa Location Intelligence · nueva plataforma territorial e inmobiliaria <button onClick={()=>setPage('explorar')}>Conocer más</button></div>
     <header className="site-header ll-global-header">
       <button className="brand ll-brand" onClick={()=>setPage('explorar')}>
         <span>G</span><div><strong>GROWA</strong><small>INMOBILIARIO</small></div><em>Insights</em>
       </button>
       <nav className="ll-topnav">
-        <button className={page==='explorar'?'active':''} onClick={()=>setPage('explorar')}>Plataforma <ChevronDown size={11}/></button>
-        <button onClick={()=>setPage('ubicaciones')}>Clientes</button>
+        <button className={page==='platform'?'active':''} onClick={()=>setPage(page==='platform'?'explorar':'platform')}>Plataforma <ChevronDown size={11}/></button>
+        <button onClick={()=>setPage('propiedades')}>Clientes</button>
         <button onClick={()=>setPage('mercado')}>Knowledge Hub <ChevronDown size={11}/></button>
         <button onClick={()=>setPage('reportes')}>Prueba gratuita</button>
       </nav>
@@ -278,7 +278,7 @@ function App() {
     const h=location.hash.replace('#','')
     if(h==='indicadores') return 'mercado'
     if(h==='territorio') return 'ubicaciones'
-    return ['explorar','mercado','ubicaciones','propiedades','prospectos','reportes'].includes(h)?h:'explorar'
+    return ['explorar','platform','mercado','ubicaciones','propiedades','prospectos','reportes'].includes(h)?h:'explorar'
   }
   const [page,setPageState]=useState(initialPage)
   const [state,setState]=useState({loading:true,error:'',records:null,geometry:null,financing:null})
