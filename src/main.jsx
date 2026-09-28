@@ -71,14 +71,25 @@ function compareWord(value, values) {
 }
 
 function Header({page,setPage}) {
+  const items=[
+    ['explorar','Explorar'],
+    ['mercado','Mercado'],
+    ['ubicaciones','Ubicaciones'],
+    ['propiedades','Propiedades'],
+    ['prospectos','Prospectos'],
+    ['reportes','Reportes']
+  ]
   return <header className="site-header">
-    <button className="brand" onClick={()=>setPage('territorio')}><span>G</span><div><strong>GROWA</strong><small>INMOBILIARIA</small></div></button>
-    <nav>
-      <button className={page==='explorar'?'active':''} onClick={()=>setPage('explorar')}>Explorar</button>
-      <button className={page==='territorio'?'active':''} onClick={()=>setPage('territorio')}>Demografía</button>
-      <button className={page==='indicadores'?'active':''} onClick={()=>setPage('indicadores')}>Indicadores</button>
-    </nav>
-    <div className="header-context"><strong>Mazatlán, Sin.</strong><span>Inteligencia para desarrollo</span></div>
+    <button className="brand" onClick={()=>setPage('explorar')}>
+      <span>G</span>
+      <div><strong>GROWA</strong><small>INMOBILIARIO</small></div>
+    </button>
+    <nav>{items.map(([key,label])=><button key={key} className={page===key?'active':''} onClick={()=>setPage(key)}>{label}</button>)}</nav>
+    <div className="header-context">
+      <button className="header-search" onClick={()=>setPage('explorar')}><Search size={14}/><span>Buscar</span></button>
+      <div className="header-city"><strong>Mazatlán, Sin.</strong><span>Mercado activo</span></div>
+      <button className="header-avatar">AM</button>
+    </div>
   </header>
 }
 
@@ -265,9 +276,15 @@ function Indicators({financing}) {
 }
 
 function App() {
-  const [page,setPageState]=useState(()=>location.hash==='#indicadores'?'indicadores':location.hash==='#territorio'?'territorio':'explorar')
+  const initialPage=()=>{
+    const h=location.hash.replace('#','')
+    if(h==='indicadores') return 'mercado'
+    if(h==='territorio') return 'ubicaciones'
+    return ['explorar','mercado','ubicaciones','propiedades','prospectos','reportes'].includes(h)?h:'explorar'
+  }
+  const [page,setPageState]=useState(initialPage)
   const [state,setState]=useState({loading:true,error:'',records:null,geometry:null,financing:null})
-  const setPage=(p)=>{setPageState(p);history.replaceState(null,'',p==='indicadores'?'#indicadores':p==='territorio'?'#territorio':'#explorar')}
+  const setPage=(p)=>{setPageState(p);history.replaceState(null,'','#'+p)}
   useEffect(()=>{
     const controller=new AbortController()
     Promise.all([
@@ -278,7 +295,12 @@ function App() {
     ]).then(([core,extra,geometry,financing])=>setState({loading:false,error:'',records:derive(unpackCore(core),extra),geometry,financing})).catch(e=>{if(!controller.signal.aborted)setState(s=>({...s,loading:false,error:String(e)}))})
     return()=>controller.abort()
   },[])
-  return <div className="app"><Header page={page} setPage={setPage}/>{state.loading?<div className="loading"><i/> Cargando territorio e indicadores…</div>:state.error?<div className="loading error">No se pudo cargar la base territorial. {state.error}</div>:page==='explorar'?<PropertyExplorer records={state.records} geometry={state.geometry}/>:page==='territorio'?<Territory data={state.records} geometry={state.geometry}/>:<Indicators financing={state.financing}/>}</div>
+  const content = page==='mercado'
+    ? <Indicators financing={state.financing}/>
+    : page==='ubicaciones'
+      ? <Territory data={state.records} geometry={state.geometry}/>
+      : <PropertyExplorer records={state.records} geometry={state.geometry} mode={page}/>
+  return <div className="app"><Header page={page} setPage={setPage}/>{state.loading?<div className="loading"><i/> Cargando inteligencia territorial…</div>:state.error?<div className="loading error">No se pudo cargar la base territorial. {state.error}</div>:content}</div>
 }
 
 createRoot(document.getElementById('root')).render(<App/>)
