@@ -71,8 +71,9 @@ function compareWord(value, values) {
 }
 
 function Header({page,setPage}) {
+  const showAnnouncement=page==='platform'
   return <>
-    <div className="ll-announcement">Growa Location Intelligence · nueva plataforma territorial e inmobiliaria <button onClick={()=>setPage('explorar')}>Conocer más</button></div>
+    {showAnnouncement&&<div className="ll-announcement">Growa Location Intelligence · nueva plataforma territorial e inmobiliaria <button onClick={()=>setPage('explorar')}>Conocer más</button></div>}
     <header className="site-header ll-global-header">
       <button className="brand ll-brand" onClick={()=>setPage('explorar')}>
         <span>G</span><div><strong>GROWA</strong><small>INMOBILIARIO</small></div><em>Insights</em>
@@ -84,6 +85,7 @@ function Header({page,setPage}) {
         <button onClick={()=>setPage('reportes')}>Prueba gratuita</button>
       </nav>
       <div className="header-context ll-header-actions">
+        <button className="ll-lang">ES</button>
         <button className="ll-login">Ingresar</button>
         <button className="ll-demo" onClick={()=>setPage('explorar')}>Solicitar demo</button>
       </div>
