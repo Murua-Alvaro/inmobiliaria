@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import {
   apiStatus,getRankings,searchLocations,getLocation,compareLocations,
-  getMarketPulse,getMarketSummary,getDistricts,getDistrict,getProperties
+  getMarketPulse,getMarketSummary,getDistricts,getDistrict,getProperties,searchAll
 } from './apiClient'
 import './app.css'
 
@@ -93,7 +93,7 @@ function SearchBox({large=false,onSelect}){
     if(!q.trim()){setRows([]);return}
     const t=setTimeout(async()=>{
       setBusy(true)
-      try{const r=await searchLocations(q,6);setRows(r.rows||[])}
+      try{const r=await searchAll(q,7);setRows(r.rows||[])}
       finally{setBusy(false)}
     },180)
     return()=>clearTimeout(t)
@@ -102,19 +102,20 @@ function SearchBox({large=false,onSelect}){
     setQ('')
     setRows([])
     if(onSelect)onSelect(row)
+    else if(row.kind==='district')go('district',row.id)
     else go('location',row.id)
   }
   return <div className={'gi-search '+(large?'large':'')}>
     <div className="gi-search-line">
       <MapPin size={large?17:14}/>
-      <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar dirección, colonia, AGEB o zona"/>
+      <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar AGEB o distrito"/>
       {busy&&<i className="gi-spinner"/>}
       {q&&<button className="gi-clear" onClick={()=>setQ('')}><X size={13}/></button>}
     </div>
     {large&&<button className="gi-search-cta" onClick={()=>rows[0]&&choose(rows[0])}><Search size={14}/> Obtener insights</button>}
     {!!rows.length&&<div className="gi-suggestions">
       {rows.map(row=><button key={row.id} onClick={()=>choose(row)}>
-        <MapPin size={13}/><div><strong>{row.label||('AGEB '+row.id.slice(-4))}</strong><span>Mazatlán, Sinaloa · {fmt(row.population)} habitantes</span></div><ArrowRight size={13}/>
+        <MapPin size={13}/><div><strong>{row.label}</strong><span>{row.subtitle}</span></div><ArrowRight size={13}/>
       </button>)}
     </div>}
   </div>
@@ -150,7 +151,7 @@ function Home(){
       <div className="gi-hero-inner">
         <span className="gi-kicker">GROWA · LOCATION INTELLIGENCE</span>
         <h1>Insights Atlas</h1>
-        <p>Inteligencia de ubicación para evaluar mercados, zonas y oportunidades inmobiliarias en Mazatlán.</p>
+        <p>Inteligencia de ubicación para evaluar AGEB, distritos, mercados y oportunidades inmobiliarias en Mazatlán.</p>
         <SearchBox large/>
       </div>
     </section>
