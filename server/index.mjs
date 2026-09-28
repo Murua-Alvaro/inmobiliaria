@@ -6,9 +6,10 @@ import path from 'node:path'
 const PORT=Number(process.env.PORT||3001)
 const ALLOWED_ORIGIN=process.env.ALLOWED_ORIGIN||'*'
 const UPSTREAM='https://growa-territorial.onrender.com/data/territories/mx-sin-mazatlan/inmobiliario'
+const CODESIN_UPSTREAM='https://growa-territorial.onrender.com/data/territories/mx-sin-mazatlan/geometry/codesin-districts.geojson'
 const LOCAL_DATA=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../public/data')
 
-let state={loadedAt:null,records:[],marketPulse:null,finance:null,urbanFootprint:null,source:'unloaded'}
+let state={loadedAt:null,records:[],marketPulse:null,finance:null,urbanFootprint:null,districts:[],source:'unloaded'}
 let loading=null
 
 const num=v=>v===null||v===undefined||v===''?null:Number.isFinite(Number(v))?Number(v):null
@@ -81,19 +82,124 @@ async function loadJson(name,optional=false){
     catch{if(optional)return null;throw error}
   }
 }
+
+async function loadUrlJson(url,localName,optional=false){
+  try{
+    const r=await fetch(url,{signal:AbortSignal.timeout(15000)})
+    if(!r.ok)throw new Error(String(r.status))
+    return await r.json()
+  }catch(error){
+    try{return JSON.parse(await readFile(path.join(LOCAL_DATA,localName),'utf8'))}
+    catch{if(optional)return null;throw error}
+  }
+}
+function flattenCoords(value,out=[]){
+  if(!Array.isArray(value))return out
+  if(value.length>=2&&typeof value[0]==='number'&&typeof value[1]==='number'){out.push([value[0],value[1]]);return out}
+  for(const item of value)flattenCoords(item,out)
+  return out
+}
+function centerOfGeometry(geometry){
+  const pts=flattenCoords(geometry?.coordinates,[])
+  if(!pts.length)return null
+  let sx=0,sy=0
+  for(const [x,y] of pts){sx+=x;sy+=y}
+  return [sx/pts.length,sy/pts.length]
+}
+function pointInRing([x,y],ring){
+  let inside=false
+  for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+    const [xi,yi]=ring[i], [xj,yj]=ring[j]
+    const intersect=((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/((yj-yi)||1e-12)+xi)
+    if(intersect)inside=!inside
+  }
+  return inside
+}
+function pointInPolygon(point,poly){
+  if(!poly?.length||!pointInRing(point,poly[0]))return false
+  for(let i=1;i<poly.length;i++)if(pointInRing(point,poly[i]))return false
+  return true
+}
+function pointInFeature(point,feature){
+  const g=feature?.geometry
+  if(!g||!point)return false
+  if(g.type==='Polygon')return pointInPolygon(point,g.coordinates)
+  if(g.type==='MultiPolygon')return g.coordinates.some(poly=>pointInPolygon(point,poly))
+  return false
+}
+function slugify(value){
+  return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')
+}
+function buildDistricts(records,agebGeometry,codesin){
+  const byId=new Map(records.map(r=>[r.id,r]))
+  const buckets=new Map()
+  for(const feature of codesin?.features||[]){
+    const name=String(feature?.properties?.district||'Distrito')
+    buckets.set(name,{name,slug:slugify(name),ageb_ids:[],declared_ageb_count:Number(feature?.properties?.ageb_count||0)})
+  }
+  for(const feature of agebGeometry?.features||[]){
+    const id=String(feature?.properties?.cvegeo_ageb||feature?.properties?.CVEGEO||'').slice(0,13)
+    const record=byId.get(id)
+    if(!record)continue
+    const center=centerOfGeometry(feature.geometry)
+    const districtFeature=(codesin?.features||[]).find(d=>pointInFeature(center,d))
+    if(!districtFeature)continue
+    const name=String(districtFeature?.properties?.district||'Distrito')
+    const bucket=buckets.get(name)
+    if(bucket)bucket.ageb_ids.push(id)
+  }
+  return [...buckets.values()].map(d=>{
+    const rows=d.ageb_ids.map(id=>byId.get(id)).filter(Boolean)
+    const sum=k=>rows.reduce((a,r)=>a+(Number(r[k])||0),0)
+    const avg=k=>rows.length?rows.reduce((a,r)=>a+(Number(r[k])||0),0)/rows.length:null
+    return {
+      ...d,
+      ageb_count:rows.length||d.declared_ageb_count,
+      population:sum('population'),
+      households:sum('households'),
+      occupied_housing:sum('occupied_housing'),
+      opportunity_score:avg('opportunity_score')===null?null:Math.round(avg('opportunity_score')),
+      mobility_share:avg('recent_mobility_share'),
+      adult_share:avg('adult_share'),
+      external_origin_share:avg('external_origin_share'),
+    }
+  }).sort((a,b)=>(b.opportunity_score||0)-(a.opportunity_score||0))
+}
+function marketSummary(){
+  const p=state.marketPulse||{}
+  const f=state.finance||{}
+  return {
+    geography:p.geography||f.geography||'Municipio de Mazatlán',
+    observed_through:p.observed_through||f.observed_through||null,
+    source:p.source||f.source||null,
+    modalities:p.modalities||[],
+    segments:p.new_housing_value_segments||[],
+    h1_comparison:f.h1_2026_vs_2025||null,
+    h1:f.h1||null,
+    latest_month:(f.monthly||[]).at(-1)||null,
+    monthly:(f.monthly||[]).slice(-18),
+    potential_demand:f.potential_demand||null,
+    age_profile:f.age_profile||[],
+    notes:[...(p.notes||[]),...(f.notes||[])],
+  }
+}
+
 async function load(){
   if(loading)return loading
   loading=(async()=>{
-    const [core,extra,marketPulse,finance,urbanFootprint]=await Promise.all([
+    const [core,extra,marketPulse,finance,urbanFootprint,agebGeometry,codesin]=await Promise.all([
       loadJson('ageb-core.json'),
       loadJson('ageb-profile-extra.json',true),
       loadJson('market-pulse.json',true),
       loadJson('financing-summary.json',true),
       loadJson('agebs-huella-urbana.json',true),
+      loadJson('ageb-geometry-2020.geojson',true),
+      loadUrlJson(CODESIN_UPSTREAM,'codesin-districts.geojson',true),
     ])
     const extras=new Map((extra?.records||[]).map(r=>[String(r.cvegeo_ageb||''),r]))
     const records=score(unpackCore(core).filter(isUrban).map(r=>derive({...r,...(extras.get(String(r.cvegeo_ageb||''))||{})})))
-    state={loadedAt:new Date().toISOString(),records,marketPulse,finance,urbanFootprint,source:'growa-territorial'}
+    const districts=buildDistricts(records,agebGeometry,codesin)
+    state={loadedAt:new Date().toISOString(),records,marketPulse,finance,urbanFootprint,districts,source:'growa-territorial'}
     return state
   })().finally(()=>{loading=null})
   return loading
@@ -175,6 +281,7 @@ const server=http.createServer(async(req,res)=>{
       return json(req,res,200,{
         territory:'Mazatlán, Sinaloa',
         locations:state.records.length,
+        districts:state.districts.length,
         loaded_at:state.loadedAt,
         source:state.source,
         opportunity_method:'Proxy demográfico normalizado P10–P90: población 32%, hogares 26%, adultos 14%, movilidad reciente 16%, origen externo 12%. No es avalúo ni predicción de ventas.'
@@ -218,6 +325,21 @@ const server=http.createServer(async(req,res)=>{
     }
     if(url.pathname==='/api/market-pulse'){
       return json(req,res,200,{pulse:state.marketPulse,finance:state.finance,urban_footprint:state.urbanFootprint,source:state.source})
+    }
+    if(url.pathname==='/api/market-summary'){
+      return json(req,res,200,{...marketSummary(),source_key:state.source})
+    }
+    if(url.pathname==='/api/districts'){
+      const q=(url.searchParams.get('q')||'').trim().toLowerCase()
+      const rows=state.districts.filter(d=>!q||d.name.toLowerCase().includes(q)||d.slug.includes(q))
+      return json(req,res,200,{rows,total:rows.length,source:'CODESIN + INEGI Censo 2020'})
+    }
+    if(url.pathname.startsWith('/api/districts/')){
+      const slug=decodeURIComponent(url.pathname.slice('/api/districts/'.length))
+      const district=state.districts.find(d=>d.slug===slug)
+      if(!district)return json(req,res,404,{error:'Distrito no encontrado'},'no-store')
+      const locations=district.ageb_ids.map(id=>state.records.find(r=>r.id===id)).filter(Boolean).map(pick)
+      return json(req,res,200,{district,locations,source:'CODESIN + INEGI Censo 2020'})
     }
     if(url.pathname==='/api/properties'){
       const limit=parseLimit(url.searchParams.get('limit'),24,50)
