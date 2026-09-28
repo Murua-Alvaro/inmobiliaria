@@ -354,6 +354,6 @@ const server=http.createServer(async(req,res)=>{
 
 server.listen(PORT,async()=>{
   console.log('[api] listening on',PORT)
-  try{await load();console.log('[api] loaded',state.records.length,'locations')}
+  try{await load();console.log('[api] loaded',state.records.length,'locations,',state.districts.length,'districts,',state.districts.reduce((a,d)=>a+d.ageb_ids.length,0),'AGEB assigned')}
   catch(e){console.error('[api] initial load failed',e)}
 })
