@@ -241,3 +241,18 @@ export async function getDistrict(slug){
     return {district,locations:[],source:'CODESIN'}
   }
 }
+
+
+export async function searchAll(q='',limit=8){
+  const term=q.trim()
+  if(!term)return {rows:[]}
+  const [locations,districts]=await Promise.all([
+    searchLocations(term,limit).catch(()=>({rows:[]})),
+    getDistricts(term).catch(()=>({rows:[]})),
+  ])
+  const rows=[
+    ...(districts.rows||[]).slice(0,4).map(d=>({kind:'district',id:d.slug,label:d.name,subtitle:'Distrito CODESIN · '+(d.ageb_count||'—')+' AGEB',data:d})),
+    ...(locations.rows||[]).slice(0,limit).map(r=>({kind:'location',id:r.id,label:r.label||('AGEB '+r.id.slice(-4)),subtitle:'AGEB urbana · '+(r.population?Number(r.population).toLocaleString('es-MX')+' habitantes':'Mazatlán'),data:r}))
+  ].slice(0,limit)
+  return {rows}
+}
