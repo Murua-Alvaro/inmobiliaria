@@ -47,7 +47,6 @@ const [coreText,,geometryText,,,codesinText] = await Promise.all([
 await Promise.all([
   copyOptional(INMO_BASE, 'market-pulse.json', {}),
   copyOptional(INMO_BASE, 'agebs-huella-urbana.json', {}),
-  copyOptional(INMO_BASE, 'developer-intelligence.json', { records: [] }),
   copyFrom(INMO_BASE, 'costos-construccion-inpp-ultima-observacion.csv').catch(()=>null),
 ])
 
