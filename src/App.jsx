@@ -591,24 +591,67 @@ function Market(){
   </main>
 }
 
+function PropertyDrawer({property,onClose}){
+  const [saved,setSaved]=useState(()=>{try{return JSON.parse(localStorage.getItem('growa_saved_properties')||'[]').includes(property.id)}catch{return false}})
+  const toggle=()=>{
+    try{
+      const current=JSON.parse(localStorage.getItem('growa_saved_properties')||'[]')
+      const next=current.includes(property.id)?current.filter(x=>x!==property.id):[...current,property.id]
+      localStorage.setItem('growa_saved_properties',JSON.stringify(next))
+      setSaved(next.includes(property.id))
+    }catch{}
+  }
+  return <div className="gi-property-drawer-backdrop" onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+    <aside className="gi-property-drawer">
+      <div className="gi-property-drawer-top"><span>ACTIVO DEMO</span><button onClick={onClose}><X size={15}/></button></div>
+      <div className="gi-property-drawer-hero"><span>{property.type}</span><h2>{property.title}</h2><p>AGEB {property.location_id.slice(-4)} · Mazatlán, Sinaloa</p><b>{property.opportunity_score}<em>/100</em></b></div>
+      <div className="gi-property-drawer-value"><span>Valor de referencia simulado</span><strong>{mxn(property.estimated_value)}</strong><small>{mxn(property.price_m2)} / m²</small></div>
+      <div className="gi-property-drawer-kpis"><div><span>Superficie</span><strong>{fmt(property.area_m2)} m²</strong></div><div><span>Tipo</span><strong>{property.type}</strong></div></div>
+      <div className="gi-property-drawer-actions"><button className={saved?'saved':''} onClick={toggle}><Bookmark size={13}/>{saved?' Guardada':' Guardar'}</button><button onClick={()=>go('location',property.location_id)}>Abrir ubicación <ArrowRight size={12}/></button></div>
+      <section className="gi-property-drawer-section"><span>CONTEXTO</span><p>Este activo es sintético y existe para probar el flujo de producto. El score sí se vincula al perfil territorial de su AGEB; superficie y valores son datos simulados.</p></section>
+      <section className="gi-property-drawer-section"><span>PRÓXIMAS CAPAS</span><div className="gi-property-roadmap"><p><Check size={12}/> Contexto territorial</p><p><Check size={12}/> Score de ubicación</p><p><Plus size={12}/> Predio catastral real</p><p><Plus size={12}/> Historial transaccional</p><p><Plus size={12}/> Propietario / contacto</p></div></section>
+    </aside>
+  </div>
+}
+
 function Properties(){
   const [rows,setRows]=useState([])
   const [type,setType]=useState('Todos')
-  useEffect(()=>{getProperties(30).then(r=>setRows(r.rows||[]))},[])
-  const filtered=type==='Todos'?rows:rows.filter(r=>r.type===type)
+  const [minScore,setMinScore]=useState(0)
+  const [area,setArea]=useState('all')
+  const [selected,setSelected]=useState(null)
+  const [loading,setLoading]=useState(true)
+
+  const areaFilter=area==='small'?{maxArea:1200}:area==='medium'?{minArea:1200,maxArea:3000}:area==='large'?{minArea:3000}:{}
+
+  useEffect(()=>{
+    let active=true
+    setLoading(true)
+    getProperties(60,{type,minScore,...areaFilter}).then(r=>active&&setRows(r.rows||[])).finally(()=>active&&setLoading(false))
+    return()=>{active=false}
+  },[type,minScore,area])
+
   return <main className="gi-properties">
-    <section className="gi-properties-head"><div><span>PROPERTY INTELLIGENCE</span><h1>Oportunidades inmobiliarias.</h1><p>Una capa de activos demo conectada al contexto territorial. Los inmuebles y valores mostrados son simulados.</p></div><span className="gi-demo-badge">DATOS SIMULADOS</span></section>
-    <div className="gi-property-toolbar"><div>{['Todos','Terreno','Uso mixto','Comercial','Residencial'].map(t=><button key={t} className={type===t?'active':''} onClick={()=>setType(t)}>{t}</button>)}</div><span>{filtered.length} activos</span></div>
-    <section className="gi-property-grid">
-      {filtered.map(p=><article key={p.id} className="gi-property-card">
-        <div className="gi-property-visual"><span>{p.type}</span><b>{p.opportunity_score}/100</b><MapIcon size={28}/></div>
+    <section className="gi-properties-head"><div><span>PROPERTY INTELLIGENCE</span><h1>Oportunidades inmobiliarias.</h1><p>Prototipo de activos conectado al contexto territorial. La capa de propiedad es simulada hasta integrar información predial observada.</p></div><span className="gi-demo-badge">DATOS DE ACTIVO SIMULADOS</span></section>
+
+    <div className="gi-property-filterbar">
+      <div className="gi-property-filter-group"><span>Tipo</span>{['Todos','Terreno','Uso mixto','Comercial','Residencial'].map(t=><button key={t} className={type===t?'active':''} onClick={()=>setType(t)}>{t}</button>)}</div>
+      <label><span>Score mínimo</span><select value={minScore} onChange={e=>setMinScore(Number(e.target.value))}><option value="0">Todos</option><option value="60">60+</option><option value="70">70+</option><option value="80">80+</option></select></label>
+      <label><span>Superficie</span><select value={area} onChange={e=>setArea(e.target.value)}><option value="all">Todas</option><option value="small">&lt; 1,200 m²</option><option value="medium">1,200–3,000 m²</option><option value="large">3,000+ m²</option></select></label>
+      <b>{rows.length} activos</b>
+    </div>
+
+    {loading?<div className="gi-property-skeleton">{Array.from({length:9},(_,i)=><i key={i}/>)}</div>:<section className="gi-property-grid">
+      {rows.map(p=><article key={p.id} className="gi-property-card">
+        <button className="gi-property-visual" onClick={()=>setSelected(p)}><span>{p.type}</span><b>{p.opportunity_score}/100</b><MapIcon size={28}/><em>Vista de activo</em></button>
         <div className="gi-property-body"><span>{p.id}</span><h3>{p.title}</h3><p>AGEB {p.location_id.slice(-4)} · Mazatlán, Sinaloa</p>
           <div><span><Ruler size={12}/>{fmt(p.area_m2)} m²</span><span>{mxn(p.price_m2)}/m²</span></div>
           <strong>{mxn(p.estimated_value)}</strong>
-          <button onClick={()=>go('location',p.location_id)}>Ver contexto de ubicación <ArrowRight size={12}/></button>
+          <button onClick={()=>setSelected(p)}>Ver oportunidad <ArrowRight size={12}/></button>
         </div>
       </article>)}
-    </section>
+    </section>}
+    {selected&&<PropertyDrawer property={selected} onClose={()=>setSelected(null)}/>}
   </main>
 }
 
