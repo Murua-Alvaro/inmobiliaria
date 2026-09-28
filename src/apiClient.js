@@ -156,12 +156,19 @@ export async function getMarketPulse(){
   }
 }
 
-export async function getProperties(limit=24){
-  try{return await remote('/api/properties?limit='+limit)}
+export async function getProperties(limit=24,filters={}){
+  const params=new URLSearchParams({limit:String(limit)})
+  if(filters.type&&filters.type!=='Todos')params.set('type',filters.type)
+  if(filters.minScore)params.set('min_score',String(filters.minScore))
+  if(filters.minArea)params.set('min_area',String(filters.minArea))
+  if(filters.maxArea)params.set('max_area',String(filters.maxArea))
+  if(filters.minPriceM2)params.set('min_price_m2',String(filters.minPriceM2))
+  if(filters.maxPriceM2)params.set('max_price_m2',String(filters.maxPriceM2))
+  try{return await remote('/api/properties?'+params.toString(),{noCache:true})}
   catch{
-    const records=(await localRecords()).sort((a,b)=>b.opportunity_score-a.opportunity_score).slice(0,Math.min(limit,24))
+    const records=(await localRecords()).sort((a,b)=>b.opportunity_score-a.opportunity_score).slice(0,100)
     const types=['Terreno','Uso mixto','Comercial','Residencial']
-    const rows=records.map((r,i)=>{
+    let rows=records.map((r,i)=>{
       const factor=.82+((i*37)%17)/100
       const area=Math.round(500+(r.population%4200)*factor)
       const priceM2=Math.round(7500+(r.opportunity_score*170)+((i*997)%8000))
@@ -177,10 +184,17 @@ export async function getProperties(limit=24){
         synthetic:true,
       }
     })
-    return {rows,source:'local-fallback',synthetic:true}
+    rows=rows.filter(p=>
+      (!filters.type||filters.type==='Todos'||p.type===filters.type) &&
+      (!filters.minScore||p.opportunity_score>=filters.minScore) &&
+      (!filters.minArea||p.area_m2>=filters.minArea) &&
+      (!filters.maxArea||p.area_m2<=filters.maxArea) &&
+      (!filters.minPriceM2||p.price_m2>=filters.minPriceM2) &&
+      (!filters.maxPriceM2||p.price_m2<=filters.maxPriceM2)
+    ).slice(0,limit)
+    return {rows,total:rows.length,source:'local-fallback',synthetic:true}
   }
 }
-
 
 export async function getMarketSummary(){
   try{return await remote('/api/market-summary')}
