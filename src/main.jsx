@@ -71,26 +71,24 @@ function compareWord(value, values) {
 }
 
 function Header({page,setPage}) {
-  const items=[
-    ['explorar','Explorar'],
-    ['mercado','Mercado'],
-    ['ubicaciones','Ubicaciones'],
-    ['propiedades','Propiedades'],
-    ['prospectos','Prospectos'],
-    ['reportes','Reportes']
-  ]
-  return <header className="site-header">
-    <button className="brand" onClick={()=>setPage('explorar')}>
-      <span>G</span>
-      <div><strong>GROWA</strong><small>INMOBILIARIO</small></div>
-    </button>
-    <nav>{items.map(([key,label])=><button key={key} className={page===key?'active':''} onClick={()=>setPage(key)}>{label}</button>)}</nav>
-    <div className="header-context">
-      <button className="header-search" onClick={()=>setPage('explorar')}><Search size={14}/><span>Buscar</span></button>
-      <div className="header-city"><strong>Mazatlán, Sin.</strong><span>Mercado activo</span></div>
-      <button className="header-avatar">AM</button>
-    </div>
-  </header>
+  return <>
+    <div className="ll-announcement">Growa Location Intelligence · inteligencia territorial e inmobiliaria para Mazatlán <button onClick={()=>setPage('explorar')}>Conocer más</button></div>
+    <header className="site-header ll-global-header">
+      <button className="brand ll-brand" onClick={()=>setPage('explorar')}>
+        <span>G</span><div><strong>GROWA</strong><small>INMOBILIARIO</small></div><em>Insights</em>
+      </button>
+      <nav className="ll-topnav">
+        <button className={page==='explorar'?'active':''} onClick={()=>setPage('explorar')}>Plataforma <ChevronDown size={11}/></button>
+        <button onClick={()=>setPage('ubicaciones')}>Clientes</button>
+        <button onClick={()=>setPage('mercado')}>Knowledge Hub <ChevronDown size={11}/></button>
+        <button onClick={()=>setPage('reportes')}>Prueba gratuita</button>
+      </nav>
+      <div className="header-context ll-header-actions">
+        <button className="ll-login">Ingresar</button>
+        <button className="ll-demo" onClick={()=>setPage('explorar')}>Solicitar demo</button>
+      </div>
+    </header>
+  </>
 }
 
 function grayscale(value,min,max) {
