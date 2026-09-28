@@ -180,3 +180,50 @@ export async function getProperties(limit=24){
     return {rows,source:'local-fallback',synthetic:true}
   }
 }
+
+
+export async function getMarketSummary(){
+  try{return await remote('/api/market-summary')}
+  catch{
+    const data=await getMarketPulse()
+    const p=data.pulse||{}, f=data.finance||{}
+    return {
+      geography:p.geography||f.geography||'Municipio de Mazatlán',
+      observed_through:p.observed_through||f.observed_through||null,
+      source:p.source||f.source||null,
+      modalities:p.modalities||[],
+      segments:p.new_housing_value_segments||[],
+      h1_comparison:f.h1_2026_vs_2025||null,
+      h1:f.h1||null,
+      latest_month:(f.monthly||[]).at(-1)||null,
+      monthly:(f.monthly||[]).slice(-18),
+      potential_demand:f.potential_demand||null,
+      age_profile:f.age_profile||[],
+      notes:[...(p.notes||[]),...(f.notes||[])],
+      source_key:'local-fallback'
+    }
+  }
+}
+
+export async function getDistricts(q=''){
+  try{return await remote('/api/districts?q='+encodeURIComponent(q))}
+  catch{
+    const geo=await fetch('/data/codesin-districts.geojson').then(r=>r.json())
+    const rows=(geo.features||[]).map(f=>{
+      const name=String(f.properties?.district||'Distrito')
+      const slug=name.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')
+      return {name,slug,ageb_count:Number(f.properties?.ageb_count||0),population:null,households:null,opportunity_score:null}
+    }).filter(d=>!q||d.name.toLowerCase().includes(q.toLowerCase()))
+    return {rows,total:rows.length,source:'CODESIN'}
+  }
+}
+
+export async function getDistrict(slug){
+  try{return await remote('/api/districts/'+encodeURIComponent(slug))}
+  catch{
+    const all=await getDistricts()
+    const district=(all.rows||[]).find(d=>d.slug===slug)
+    if(!district)throw new Error('Distrito no encontrado')
+    return {district,locations:[],source:'CODESIN'}
+  }
+}
