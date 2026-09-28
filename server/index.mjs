@@ -321,6 +321,22 @@ const server=http.createServer(async(req,res)=>{
       return json(req,res,200,{ok:true,service:'growa-inmobiliaria-api',loaded:Boolean(state.loadedAt),loaded_at:state.loadedAt},'no-store')
     }
     await load()
+    if(url.pathname==='/api/sources'){
+      const finance=state.finance||{}
+      const pulse=state.marketPulse||{}
+      return json(req,res,200,{
+        territory:'Mazatlán, Sinaloa',
+        datasets:[
+          {key:'censo_2020',name:'INEGI Censo de Población y Vivienda 2020',scale:'AGEB urbana',status:'observed',coverage:'275 AGEB con población'},
+          {key:'codesin',name:'Distritos CODESIN',scale:'distrito',status:'observed',coverage:state.districts.length+' distritos'},
+          {key:'sniiv_finance',name:finance.source||'SNIIV/SEDATU - Financiamientos de vivienda',scale:'municipio',status:'observed',observed_through:finance.observed_through||null},
+          {key:'market_pulse',name:pulse.source||'Market Pulse',scale:'municipio',status:'observed',observed_through:pulse.observed_through||null},
+          {key:'property_demo',name:'Capa de oportunidades inmobiliarias',scale:'activo',status:'synthetic',note:'Superficie, precio y valor son simulados para diseño de producto.'},
+          {key:'opportunity_score',name:'Opportunity Score Growa',scale:'AGEB / distrito',status:'derived',note:'Proxy demográfico; no es avalúo ni predicción de ventas.'}
+        ],
+        loaded_at:state.loadedAt
+      })
+    }
     if(url.pathname==='/api/meta'){
       return json(req,res,200,{
         territory:'Mazatlán, Sinaloa',
