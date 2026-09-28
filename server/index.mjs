@@ -342,8 +342,25 @@ const server=http.createServer(async(req,res)=>{
       return json(req,res,200,{district,locations,source:'CODESIN + INEGI Censo 2020'})
     }
     if(url.pathname==='/api/properties'){
-      const limit=parseLimit(url.searchParams.get('limit'),24,50)
-      return json(req,res,200,{rows:syntheticProperties(state.records,limit),synthetic:true,source:'derived-demo'})
+      const limit=parseLimit(url.searchParams.get('limit'),24,100)
+      const type=(url.searchParams.get('type')||'').trim().toLowerCase()
+      const minScore=Number(url.searchParams.get('min_score')||0)
+      const minArea=Number(url.searchParams.get('min_area')||0)
+      const maxArea=Number(url.searchParams.get('max_area')||Infinity)
+      const minPrice=Number(url.searchParams.get('min_price_m2')||0)
+      const maxPrice=Number(url.searchParams.get('max_price_m2')||Infinity)
+      const universe=syntheticProperties(state.records,100)
+      const rows=universe.filter(p=>{
+        const typeOk=!type||type==='todos'||p.type.toLowerCase()===type
+        return typeOk &&
+          p.opportunity_score>=minScore &&
+          p.area_m2>=minArea && p.area_m2<=maxArea &&
+          p.price_m2>=minPrice && p.price_m2<=maxPrice
+      }).slice(0,limit)
+      return json(req,res,200,{
+        rows,total:rows.length,synthetic:true,source:'derived-demo',
+        filters:{type:type||null,min_score:minScore,min_area:minArea||null,max_area:Number.isFinite(maxArea)?maxArea:null,min_price_m2:minPrice||null,max_price_m2:Number.isFinite(maxPrice)?maxPrice:null}
+      })
     }
     return json(req,res,404,{error:'Ruta no encontrada'},'no-store')
   }catch(error){
