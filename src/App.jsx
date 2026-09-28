@@ -225,8 +225,89 @@ function Platform(){
   </main>
 }
 
+
+function LocationMapExplorer({mode,rows,metric='opportunity'}){
+  const node=useRef(null), mapRef=useRef(null), layerRef=useRef(null)
+  const geometryUrl=mode==='district'?'/data/codesin-districts.geojson':'/data/ageb-geometry-2020.geojson'
+
+  useEffect(()=>{
+    if(!node.current||mapRef.current)return
+    const map=L.map(node.current,{zoomControl:false,attributionControl:false,minZoom:9,maxZoom:17})
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:20}).addTo(map)
+    L.control.zoom({position:'bottomright'}).addTo(map)
+    map.setView([23.245,-106.425],11)
+    mapRef.current=map
+    return()=>{map.remove();mapRef.current=null}
+  },[])
+
+  useEffect(()=>{
+    const map=mapRef.current
+    if(!map||!rows?.length)return
+    let cancelled=false
+    fetch(geometryUrl).then(r=>r.json()).then(geo=>{
+      if(cancelled)return
+      if(layerRef.current)layerRef.current.remove()
+      const byKey=new Map(rows.map(r=>[
+        mode==='district'?String(r.name||'').toLowerCase():String(r.id||''),
+        r
+      ]))
+      const metricField={
+        opportunity:'opportunity_score',
+        population:'population',
+        households:'households',
+        adults:'adult_share',
+        mobility:'recent_mobility_share'
+      }[metric]||'opportunity_score'
+      const vals=rows.map(r=>Number(r[metricField])).filter(Number.isFinite).sort((a,b)=>a-b)
+      const lo=vals[Math.floor(vals.length*.05)]??0, hi=vals[Math.floor(vals.length*.95)]??1
+      const palette=['#edf8f7','#d6efed','#afdeda','#7dc7c1','#43a7a3','#16777b']
+      const color=v=>{
+        if(!Number.isFinite(Number(v)))return '#f1f4f4'
+        const t=Math.max(0,Math.min(1,(Number(v)-lo)/(hi-lo||1)))
+        return palette[Math.min(palette.length-1,Math.floor(t*palette.length))]
+      }
+      const featureRows=(geo.features||[]).filter(ft=>{
+        const key=mode==='district'
+          ?String(ft.properties?.district||'').toLowerCase()
+          :String(ft.properties?.cvegeo_ageb||ft.properties?.CVEGEO||'').slice(0,13)
+        return byKey.has(key)
+      })
+      const layer=L.geoJSON({type:'FeatureCollection',features:featureRows},{
+        style:ft=>{
+          const key=mode==='district'
+            ?String(ft.properties?.district||'').toLowerCase()
+            :String(ft.properties?.cvegeo_ageb||ft.properties?.CVEGEO||'').slice(0,13)
+          const row=byKey.get(key)
+          return {color:'#fff',weight:1,fillColor:color(row?.[metricField]),fillOpacity:.82}
+        },
+        onEachFeature:(ft,l)=>{
+          const key=mode==='district'
+            ?String(ft.properties?.district||'').toLowerCase()
+            :String(ft.properties?.cvegeo_ageb||ft.properties?.CVEGEO||'').slice(0,13)
+          const row=byKey.get(key)
+          if(!row)return
+          const title=mode==='district'?row.name:'AGEB '+row.id.slice(-4)
+          const value=row[metricField]
+          const label=mode==='district'?'Opportunity Score':(RANK_METRICS.find(m=>m.key===metric)?.label||'Oportunidad')
+          l.bindTooltip('<div class="gi-map-tip"><small>'+title+'</small><strong>'+fmt(value,metric==='opportunity'?0:1)+'</strong><span>'+label+'</span></div>',{sticky:true,direction:'top'})
+          l.on('click',()=>mode==='district'?go('district',row.slug):go('location',row.id))
+        }
+      }).addTo(map)
+      layerRef.current=layer
+      if(layer.getBounds().isValid())map.fitBounds(layer.getBounds(),{padding:[20,20]})
+    }).catch(()=>{})
+    return()=>{cancelled=true}
+  },[geometryUrl,mode,rows,metric])
+
+  return <div className="gi-location-map-wrap">
+    <div ref={node} className="gi-location-map"/>
+    <div className="gi-location-map-legend"><span>{mode==='district'?'Score distrital':(RANK_METRICS.find(m=>m.key===metric)?.label||'Oportunidad')}</span><div><i/><i/><i/><i/><i/><i/></div><small><b>menor</b><b>mayor</b></small></div>
+  </div>
+}
+
 function Locations(){
   const [mode,setMode]=useState('ageb')
+  const [view,setView]=useState('grid')
   const [rows,setRows]=useState([])
   const [districts,setDistricts]=useState([])
   const [q,setQ]=useState('')
@@ -261,25 +342,26 @@ function Locations(){
     {mode==='ageb'?<>
       <div className="gi-location-toolbar">
         <div>{RANK_METRICS.map(m=><button key={m.key} className={metric===m.key?'active':''} onClick={()=>setMetric(m.key)}>{m.label}</button>)}</div>
+        <div className="gi-view-switch"><button className={view==='grid'?'active':''} onClick={()=>setView('grid')}><LayoutGrid size={12}/> Lista</button><button className={view==='map'?'active':''} onClick={()=>setView('map')}><MapIcon size={12}/> Mapa</button></div>
         <span>{fmt(count)} ubicaciones</span>
       </div>
-      <section className="gi-location-list">
+      {view==='map'?<LocationMapExplorer mode="ageb" rows={rows} metric={metric}/>:<section className="gi-location-list">
         {rows.map(row=><article key={row.id} className="gi-location-card">
           <div className="gi-location-card-head"><div><span>AGEB URBANA</span><h3>{row.id.slice(-4)}</h3><small>{row.id}</small></div><b>{row.opportunity_score}<em>/100</em></b></div>
           <div className="gi-location-kpis"><div><span>Población</span><strong>{fmt(row.population)}</strong></div><div><span>Hogares</span><strong>{fmt(row.households)}</strong></div><div><span>Movilidad</span><strong>{pct(row.recent_mobility_share)}</strong></div></div>
           <div className="gi-location-actions"><button onClick={()=>toggle(row.id)} className={compare.includes(row.id)?'selected':''}>{compare.includes(row.id)?<Check size={13}/>:<Plus size={13}/>} Comparar</button><button onClick={()=>go('location',row.id)}>Ver perfil <ArrowRight size={12}/></button></div>
         </article>)}
-      </section>
+      </section>}
       {!!compare.length&&<CompareTray ids={compare} onRemove={id=>toggle(id)} onClose={()=>setCompare([])}/>}
     </>:<>
-      <div className="gi-location-toolbar"><div><button className="active">Contexto distrital</button></div><span>{fmt(count)} distritos</span></div>
-      <section className="gi-district-grid">
+      <div className="gi-location-toolbar"><div><button className="active">Contexto distrital</button></div><div className="gi-view-switch"><button className={view==='grid'?'active':''} onClick={()=>setView('grid')}><LayoutGrid size={12}/> Lista</button><button className={view==='map'?'active':''} onClick={()=>setView('map')}><MapIcon size={12}/> Mapa</button></div><span>{fmt(count)} distritos</span></div>
+      {view==='map'?<LocationMapExplorer mode="district" rows={districts}/>:<section className="gi-district-grid">
         {districts.map((d,i)=><article key={d.slug} className="gi-district-card">
           <header><span>{String(i+1).padStart(2,'0')}</span><div><strong>{d.name}</strong><small>DISTRITO CODESIN</small></div>{d.opportunity_score!==null&&d.opportunity_score!==undefined?<b>{d.opportunity_score}<em>/100</em></b>:null}</header>
           <div className="gi-district-kpis"><div><span>AGEB</span><strong>{fmt(d.ageb_count)}</strong></div><div><span>Población</span><strong>{d.population?fmt(d.population):'—'}</strong></div><div><span>Hogares</span><strong>{d.households?fmt(d.households):'—'}</strong></div></div>
           <button onClick={()=>go('district',d.slug)}>Abrir distrito <ArrowRight size={12}/></button>
         </article>)}
-      </section>
+      </section>}
     </>}
   </main>
 }
@@ -353,6 +435,15 @@ function ScoreBar({label,value}){
 function LocationProfile({id}){
   const [data,setData]=useState(null)
   const [tab,setTab]=useState('overview')
+  const [saved,setSaved]=useState(()=>{try{return JSON.parse(localStorage.getItem('growa_saved_locations')||'[]').includes(id)}catch{return false}})
+  const toggleSaved=()=>{
+    try{
+      const current=JSON.parse(localStorage.getItem('growa_saved_locations')||'[]')
+      const next=current.includes(id)?current.filter(x=>x!==id):[...current,id]
+      localStorage.setItem('growa_saved_locations',JSON.stringify(next))
+      setSaved(next.includes(id))
+    }catch{}
+  }
   useEffect(()=>{getLocation(id).then(setData)},[id])
   if(!data)return <div className="gi-page-loading"><i/> Cargando perfil territorial…</div>
   const r=data.location
@@ -363,7 +454,7 @@ function LocationProfile({id}){
       <div><span>LOCATION PROFILE · MAZATLÁN</span><h1>AGEB {r.id.slice(-4)}</h1><p>{r.id} · perfil territorial urbano</p></div>
       <div className="gi-profile-score"><strong>{r.opportunity_score}</strong><span>/100</span><small>Opportunity Score</small></div>
     </section>
-    <div className="gi-profile-actions"><button><Bookmark size={13}/> Guardar</button><button><Download size={13}/> Exportar</button><button onClick={()=>go('locations')}><Plus size={13}/> Comparar</button></div>
+    <div className="gi-profile-actions"><button className={saved?'saved':''} onClick={toggleSaved}><Bookmark size={13}/>{saved?' Guardada':' Guardar'}</button><button onClick={()=>window.print()}><Download size={13}/> Exportar / PDF</button><button onClick={()=>go('locations')}><Plus size={13}/> Comparar</button></div>
     <div className="gi-profile-tabs">
       {[['overview','Resumen'],['demography','Demografía'],['market','Mercado'],['method','Metodología']].map(([k,l])=><button className={tab===k?'active':''} key={k} onClick={()=>setTab(k)}>{l}</button>)}
     </div>
