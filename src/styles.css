@@ -25,17 +25,10 @@
 
 
 /* Local Logic shell · Growa */
-.ll-announcement{height:31px;background:#174d54;color:#d9eeee;display:flex;align-items:center;justify-content:center;gap:14px;font-size:7px;letter-spacing:.01em}
-.ll-announcement button{border:0;background:transparent;color:#7fe0d8;text-decoration:underline;font-size:7px}
-.ll-global-header{height:63px;padding:0 30px;border-bottom:1px solid #edf1f1;position:sticky;top:0;background:rgba(255,255,255,.98);z-index:1600}
-.ll-brand{margin-right:62px;gap:9px}
-.ll-brand>span{width:26px;height:26px;background:#0b8b8e;border-radius:2px;font-size:12px}
-.ll-brand>div{gap:7px}.ll-brand strong{font-size:11px;color:#153f44}.ll-brand small{font-size:6px;color:#789397}
-.ll-brand em{font-style:normal;font-size:6px;background:#0b8b8e;color:#fff;padding:5px 8px;border-radius:11px;margin-left:4px}
-.ll-topnav{align-self:stretch;display:flex!important;gap:4px!important}
-.ll-topnav button{display:flex;align-items:center;gap:4px;padding:0 13px!important;font-size:8px!important;color:#4f7478!important}
-.ll-topnav button:after{display:none!important}.ll-topnav button:hover,.ll-topnav button.active{color:#0a777a!important;background:#f8fbfb}
-.ll-header-actions{gap:9px!important}
-.ll-login{border:0;background:transparent;font-size:7px;color:#55787c}
-.ll-demo{height:34px;border:0;border-radius:3px;background:#0b8b8e;color:#fff;padding:0 15px;font-size:7px;font-weight:700}
+.ll-announcement{height:30px;background:#174d54;color:#d9eeee;display:flex;align-items:center;justify-content:center;gap:14px;font-size:6px;letter-spacing:.01em}
+.ll-announcement button{border:0;background:transparent;color:#8fe0da;text-decoration:underline;font-size:6px}
+.ll-global-header{height:64px;padding:0 31px;border-bottom:1px solid #edf1f1;position:sticky;top:0;background:rgba(255,255,255,.985);z-index:1600;box-shadow:none}
+.ll-brand{margin-right:64px;gap:9px}.ll-brand>span{width:27px;height:27px;background:#0b8b8e;border-radius:2px;font-size:12px}.ll-brand>div{gap:7px}.ll-brand strong{font-size:11px;color:#153f44}.ll-brand small{font-size:6px;color:#7a9498}.ll-brand em{font-style:normal;font-size:5px;background:#0b8b8e;color:#fff;padding:5px 8px;border-radius:11px;margin-left:3px}
+.ll-topnav{align-self:stretch;display:flex!important;gap:3px!important}.ll-topnav button{display:flex;align-items:center;gap:4px;padding:0 13px!important;font-size:7px!important;color:#4f7478!important}.ll-topnav button:after{display:none!important}.ll-topnav button:hover,.ll-topnav button.active{color:#0a777a!important;background:#fbfdfd}
+.ll-header-actions{gap:9px!important}.ll-login{border:0;background:transparent;font-size:7px;color:#55787c}.ll-demo{height:34px;border:0;border-radius:3px;background:#0b8b8e;color:#fff;padding:0 15px;font-size:7px;font-weight:700}
 @media(max-width:900px){.ll-global-header{padding:0 14px}.ll-brand{margin-right:18px}.ll-topnav button:nth-child(n+3){display:none}.ll-login{display:none}}
