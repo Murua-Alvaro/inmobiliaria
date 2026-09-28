@@ -2,7 +2,7 @@ import React,{useEffect,useMemo,useRef,useState} from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import {
-  Search,ChevronDown,MapPin,ArrowRight,Users,Home,Building2,BarChart3,
+  Search,ChevronDown,MapPin,ArrowRight,Users,Home as HomeIcon,Building2,BarChart3,
   Store,School,CloudSun,Target,Layers3,Download,Bookmark,X,Plus,Database,
   BriefcaseBusiness,TrendingUp,ArrowUpRight,LayoutGrid,ListFilter,Ruler,
   Info,Map as MapIcon,Check,PanelTop,MessageSquareText,Sparkles
@@ -310,7 +310,7 @@ function LocationProfile({id}){
           <section className="gi-profile-section"><header><span>LECTURA TERRITORIAL</span></header>
             <div className="gi-insights">
               <p><Users size={14}/><span><b>{fmt(r.population)} residentes</b> conforman la base poblacional observada en el Censo 2020.</span></p>
-              <p><Home size={14}/><span><b>{fmt(r.households)} hogares</b> y {fmt(r.household_size,1)} ocupantes por vivienda habitada.</span></p>
+              <p><HomeIcon size={14}/><span><b>{fmt(r.households)} hogares</b> y {fmt(r.household_size,1)} ocupantes por vivienda habitada.</span></p>
               <p><TrendingUp size={14}/><span><b>{pct(r.recent_mobility_share)} de movilidad interestatal reciente</b>, usada como una señal descriptiva de atracción residencial.</span></p>
             </div>
           </section>
