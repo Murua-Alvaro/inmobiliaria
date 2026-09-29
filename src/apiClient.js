@@ -164,6 +164,10 @@ export async function getProperties(limit=24,filters={}){
   if(filters.maxArea)params.set('max_area',String(filters.maxArea))
   if(filters.minPriceM2)params.set('min_price_m2',String(filters.minPriceM2))
   if(filters.maxPriceM2)params.set('max_price_m2',String(filters.maxPriceM2))
+  if(filters.minValue)params.set('min_value',String(filters.minValue))
+  if(filters.maxValue)params.set('max_value',String(filters.maxValue))
+  if(filters.q)params.set('q',String(filters.q))
+  if(filters.sort)params.set('sort',String(filters.sort))
   try{return await remote('/api/properties?'+params.toString(),{noCache:true})}
   catch{
     const records=(await localRecords()).sort((a,b)=>b.opportunity_score-a.opportunity_score).slice(0,100)
@@ -184,14 +188,24 @@ export async function getProperties(limit=24,filters={}){
         synthetic:true,
       }
     })
+    const q=String(filters.q||'').trim().toLowerCase()
     rows=rows.filter(p=>
       (!filters.type||filters.type==='Todos'||p.type===filters.type) &&
       (!filters.minScore||p.opportunity_score>=filters.minScore) &&
       (!filters.minArea||p.area_m2>=filters.minArea) &&
       (!filters.maxArea||p.area_m2<=filters.maxArea) &&
       (!filters.minPriceM2||p.price_m2>=filters.minPriceM2) &&
-      (!filters.maxPriceM2||p.price_m2<=filters.maxPriceM2)
-    ).slice(0,limit)
+      (!filters.maxPriceM2||p.price_m2<=filters.maxPriceM2) &&
+      (!filters.minValue||p.estimated_value>=filters.minValue) &&
+      (!filters.maxValue||p.estimated_value<=filters.maxValue) &&
+      (!q||p.id.toLowerCase().includes(q)||p.title.toLowerCase().includes(q)||p.type.toLowerCase().includes(q)||('ageb '+p.location_id.slice(-4)).includes(q))
+    )
+    const sort=filters.sort||'score_desc'
+    rows.sort((a,b)=>sort==='value_desc'?b.estimated_value-a.estimated_value:
+      sort==='price_asc'?a.price_m2-b.price_m2:
+      sort==='area_desc'?b.area_m2-a.area_m2:
+      b.opportunity_score-a.opportunity_score)
+    rows=rows.slice(0,limit)
     return {rows,total:rows.length,source:'local-fallback',synthetic:true}
   }
 }
