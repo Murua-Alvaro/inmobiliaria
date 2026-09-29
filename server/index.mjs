@@ -402,25 +402,85 @@ const server=http.createServer(async(req,res)=>{
       const locations=district.ageb_ids.map(id=>state.records.find(r=>r.id===id)).filter(Boolean).map(pick)
       return json(req,res,200,{district,locations,source:'CODESIN + INEGI Censo 2020'})
     }
+    if(url.pathname==='/api/property-facets'){
+      const universe=syntheticProperties(state.records,100)
+      const byType={}
+      for(const p of universe)byType[p.type]=(byType[p.type]||0)+1
+      const values=universe.map(p=>p.estimated_value).filter(Number.isFinite).sort((a,b)=>a-b)
+      const prices=universe.map(p=>p.price_m2).filter(Number.isFinite).sort((a,b)=>a-b)
+      const areas=universe.map(p=>p.area_m2).filter(Number.isFinite).sort((a,b)=>a-b)
+      const q=(arr,p)=>arr[Math.min(arr.length-1,Math.max(0,Math.floor((arr.length-1)*p)))]||null
+      return json(req,res,200,{
+        total:universe.length,
+        types:byType,
+        ranges:{
+          value:{min:values[0]||null,p25:q(values,.25),median:q(values,.5),p75:q(values,.75),max:values.at(-1)||null},
+          price_m2:{min:prices[0]||null,p25:q(prices,.25),median:q(prices,.5),p75:q(prices,.75),max:prices.at(-1)||null},
+          area_m2:{min:areas[0]||null,p25:q(areas,.25),median:q(areas,.5),p75:q(areas,.75),max:areas.at(-1)||null}
+        },
+        synthetic:true,source:'derived-demo'
+      })
+    }
     if(url.pathname==='/api/properties'){
       const limit=parseLimit(url.searchParams.get('limit'),24,100)
       const type=(url.searchParams.get('type')||'').trim().toLowerCase()
+      const query=(url.searchParams.get('q')||'').trim().toLowerCase()
+      const sort=url.searchParams.get('sort')||'score_desc'
       const minScore=Number(url.searchParams.get('min_score')||0)
       const minArea=Number(url.searchParams.get('min_area')||0)
       const maxArea=Number(url.searchParams.get('max_area')||Infinity)
       const minPrice=Number(url.searchParams.get('min_price_m2')||0)
       const maxPrice=Number(url.searchParams.get('max_price_m2')||Infinity)
+      const minValue=Number(url.searchParams.get('min_value')||0)
+      const maxValue=Number(url.searchParams.get('max_value')||Infinity)
       const universe=syntheticProperties(state.records,100)
-      const rows=universe.filter(p=>{
+      let rows=universe.filter(p=>{
         const typeOk=!type||type==='todos'||p.type.toLowerCase()===type
-        return typeOk &&
+        const queryOk=!query||
+          p.id.toLowerCase().includes(query)||
+          p.type.toLowerCase().includes(query)||
+          p.title.toLowerCase().includes(query)||
+          ('ageb '+p.location_id.slice(-4)).includes(query)||
+          p.location_id.toLowerCase().includes(query)
+        return typeOk && queryOk &&
           p.opportunity_score>=minScore &&
           p.area_m2>=minArea && p.area_m2<=maxArea &&
-          p.price_m2>=minPrice && p.price_m2<=maxPrice
-      }).slice(0,limit)
+          p.price_m2>=minPrice && p.price_m2<=maxPrice &&
+          p.estimated_value>=minValue && p.estimated_value<=maxValue
+      })
+      rows.sort((a,b)=>{
+        if(sort==='value_desc')return b.estimated_value-a.estimated_value
+        if(sort==='price_asc')return a.price_m2-b.price_m2
+        if(sort==='area_desc')return b.area_m2-a.area_m2
+        return b.opportunity_score-a.opportunity_score
+      })
+      const total=rows.length
+      rows=rows.slice(0,limit)
+      const avg=key=>rows.length?rows.reduce((a,r)=>a+(Number(r[key])||0),0)/rows.length:null
       return json(req,res,200,{
-        rows,total:rows.length,synthetic:true,source:'derived-demo',
-        filters:{type:type||null,min_score:minScore,min_area:minArea||null,max_area:Number.isFinite(maxArea)?maxArea:null,min_price_m2:minPrice||null,max_price_m2:Number.isFinite(maxPrice)?maxPrice:null}
+        rows,total,synthetic:true,source:'derived-demo',
+        summary:{
+          avg_score:avg('opportunity_score'),
+          avg_price_m2:avg('price_m2'),
+          avg_area_m2:avg('area_m2'),
+          visible_value:rows.reduce((a,r)=>a+(Number(r.estimated_value)||0),0)
+        },
+        filters:{type:type||null,q:query||null,sort,min_score:minScore,min_area:minArea||null,max_area:Number.isFinite(maxArea)?maxArea:null,min_price_m2:minPrice||null,max_price_m2:Number.isFinite(maxPrice)?maxPrice:null,min_value:minValue||null,max_value:Number.isFinite(maxValue)?maxValue:null}
+      })
+    }
+    if(url.pathname.startsWith('/api/properties/')){
+      const id=decodeURIComponent(url.pathname.slice('/api/properties/'.length))
+      const property=syntheticProperties(state.records,100).find(p=>p.id===id)
+      if(!property)return json(req,res,404,{error:'Activo no encontrado'},'no-store')
+      const location=state.records.find(r=>r.id===property.location_id)
+      const district=state.districts.find(d=>d.ageb_ids.includes(property.location_id))||null
+      return json(req,res,200,{
+        property,
+        location:pick(location),
+        district:district?{name:district.name,slug:district.slug,opportunity_score:district.opportunity_score}:null,
+        market:marketSummary(),
+        synthetic:true,
+        source:'derived-demo + growa-territorial'
       })
     }
     return json(req,res,404,{error:'Ruta no encontrada'},'no-store')
