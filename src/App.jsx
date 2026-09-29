@@ -14,6 +14,8 @@ import {
 import './app.css'
 import { Landing, SiteHeader, SiteFooter, DataPlatform } from './Experience'
 import './experience.css'
+import { TerritoryWorkspace } from './Professional'
+import { Portfolio } from './Portfolio'
 
 const fmt=(v,d=0)=>Number.isFinite(Number(v))
   ? Number(v).toLocaleString('es-MX',{minimumFractionDigits:d,maximumFractionDigits:d})
@@ -784,6 +786,8 @@ function App(){
   else if(page==='district'&&route.id)content=<DistrictProfile key={route.id} slug={route.id}/>
   else if(page==='market')content=<Market/>
   else if(page==='properties')content=<Properties/>
+  else if(page==='territory')content=<TerritoryWorkspace/>
+  else if(page.split('?')[0]==='portfolio')content=<Portfolio/>
   return <div className="gi-app">
     <a className="gl-skip" href="#main-content" onClick={e=>{e.preventDefault();document.querySelector('main')?.focus()}}>Ir al contenido</a>
     <SiteHeader page={page}/>

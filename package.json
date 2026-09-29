@@ -13,11 +13,11 @@
     "@deck.gl/layers": "latest",
     "@deck.gl/react": "latest",
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
+    "leaflet": "latest",
+    "lucide-react": "latest",
+    "polygon-clipping": "^0.15.7",
     "react": "latest",
     "react-dom": "latest",
-    "leaflet": "latest",
-    "lucide-react": "latest"
-  },
-  "devDependencies": {}
+    "vite": "latest"
+  }
 }
