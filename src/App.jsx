@@ -76,7 +76,7 @@ function Header({page}){
       <button className="gi-demo" onClick={()=>go('properties')}>Abrir workspace <ArrowRight size={13}/></button>
     </div>
   </header>
-}function SearchBox
+}
 
 function SearchBox({large=false,onSelect}){
   const [q,setQ]=useState('')
@@ -272,7 +272,7 @@ function Platform(){
       </div>
     </section>
   </main>
-}function LocationMapExplorer
+}
 
 function LocationMapExplorer({mode,rows,metric='opportunity'}){
   const node=useRef(null), mapRef=useRef(null), layerRef=useRef(null)
@@ -651,7 +651,7 @@ function Market(){
       </div>
     </section>
   </main>
-}function PropertyMap
+}
 
 function PropertyMap({rows=[],selected,onSelect}){
   const node=useRef(null),mapRef=useRef(null),layerRef=useRef(null)
@@ -874,7 +874,7 @@ function Properties(){
       {selected&&<PropertyDrawer property={selected} onClose={()=>setSelected(null)}/>}
     </div>
   </main>
-}function App(){
+}
 
 function App(){
   const [route,setRoute]=useState(routeFromHash)
