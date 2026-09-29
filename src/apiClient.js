@@ -210,6 +210,45 @@ export async function getProperties(limit=24,filters={}){
   }
 }
 
+
+export async function getOverview(){
+  try{return await remote('/api/overview')}
+  catch{
+    const [rankings,districts,market]=await Promise.all([
+      getRankings('opportunity',100),
+      getDistricts(),
+      getMarketSummary()
+    ])
+    const rows=rankings.rows||[]
+    return {
+      geography:'Mazatlán, Sinaloa',
+      coverage:{
+        locations:rows.length,
+        districts:(districts.rows||[]).length,
+        population:rows.reduce((a,r)=>a+(Number(r.population)||0),0),
+        households:rows.reduce((a,r)=>a+(Number(r.households)||0),0),
+        high_opportunity_locations:rows.filter(r=>(Number(r.opportunity_score)||0)>=70).length
+      },
+      market,
+      top_locations:rows.slice(0,8),
+      top_districts:(districts.rows||[]).slice(0,6),
+      source:'local-fallback'
+    }
+  }
+}
+
+export async function getPropertyDetail(id){
+  try{return await remote('/api/properties/'+encodeURIComponent(id),{noCache:true})}
+  catch{
+    const all=await getProperties(100)
+    const property=(all.rows||[]).find(p=>p.id===id)
+    if(!property)throw new Error('Activo no encontrado')
+    const location=await getLocation(property.location_id).then(r=>r.location).catch(()=>null)
+    const market=await getMarketSummary().catch(()=>null)
+    return {property,location,district:null,market,benchmarks:null,signals:[],synthetic:true,source:'local-fallback'}
+  }
+}
+
 export async function getMarketSummary(){
   try{return await remote('/api/market-summary')}
   catch{
