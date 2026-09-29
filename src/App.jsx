@@ -592,6 +592,57 @@ function Market(){
   </main>
 }
 
+
+function PropertyMap({rows=[],selected,onSelect}){
+  const node=useRef(null),mapRef=useRef(null),layerRef=useRef(null)
+  useEffect(()=>{
+    if(!node.current||mapRef.current)return
+    const map=L.map(node.current,{zoomControl:false,attributionControl:false,minZoom:9,maxZoom:18})
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:20}).addTo(map)
+    L.control.zoom({position:'bottomright'}).addTo(map)
+    map.setView([23.245,-106.425],11)
+    mapRef.current=map
+    return()=>{map.remove();mapRef.current=null}
+  },[])
+  useEffect(()=>{
+    const map=mapRef.current
+    if(!map)return
+    let cancelled=false
+    fetch('/data/ageb-geometry-2020.geojson').then(r=>r.json()).then(geo=>{
+      if(cancelled)return
+      if(layerRef.current)layerRef.current.remove()
+      const byId=new Map()
+      rows.forEach(p=>{
+        const id=String(p.location_id||'')
+        if(!byId.has(id))byId.set(id,[])
+        byId.get(id).push(p)
+      })
+      const features=(geo.features||[]).filter(ft=>byId.has(String(ft.properties?.cvegeo_ageb||ft.properties?.CVEGEO||'').slice(0,13)))
+      const layer=L.geoJSON({type:'FeatureCollection',features},{
+        style:ft=>{
+          const id=String(ft.properties?.cvegeo_ageb||ft.properties?.CVEGEO||'').slice(0,13)
+          const group=byId.get(id)||[]
+          const maxScore=Math.max(...group.map(x=>Number(x.opportunity_score)||0),0)
+          const active=selected&&String(selected.location_id)===id
+          return {color:active?'#083f47':'#fff',weight:active?2:1,fillColor:maxScore>=80?'#0b777d':maxScore>=65?'#5ca7a7':'#b8d7d5',fillOpacity:active?.92:.78}
+        },
+        onEachFeature:(ft,l)=>{
+          const id=String(ft.properties?.cvegeo_ageb||ft.properties?.CVEGEO||'').slice(0,13)
+          const group=byId.get(id)||[]
+          const best=[...group].sort((a,b)=>b.opportunity_score-a.opportunity_score)[0]
+          if(!best)return
+          l.bindTooltip('<div class="gi-map-tip"><small>AGEB '+id.slice(-4)+'</small><strong>'+group.length+' activo'+(group.length===1?'':'s')+'</strong><span>Score '+best.opportunity_score+'/100</span></div>',{sticky:true,direction:'top'})
+          l.on('click',()=>onSelect?.(best))
+        }
+      }).addTo(map)
+      layerRef.current=layer
+      if(layer.getBounds().isValid())map.fitBounds(layer.getBounds(),{padding:[24,24]})
+    }).catch(()=>{})
+    return()=>{cancelled=true}
+  },[rows,selected,onSelect])
+  return <div className="gi-property-map" ref={node}/>
+}
+
 function PropertyDrawer({property,onClose}){
   const [saved,setSaved]=useState(()=>{try{return JSON.parse(localStorage.getItem('growa_saved_properties')||'[]').includes(property.id)}catch{return false}})
   const toggle=()=>{
@@ -602,17 +653,40 @@ function PropertyDrawer({property,onClose}){
       setSaved(next.includes(property.id))
     }catch{}
   }
-  return <div className="gi-property-drawer-backdrop" onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-    <aside className="gi-property-drawer">
-      <div className="gi-property-drawer-top"><span>ACTIVO DEMO</span><button onClick={onClose}><X size={15}/></button></div>
-      <div className="gi-property-drawer-hero"><span>{property.type}</span><h2>{property.title}</h2><p>AGEB {property.location_id.slice(-4)} · Mazatlán, Sinaloa</p><b>{property.opportunity_score}<em>/100</em></b></div>
-      <div className="gi-property-drawer-value"><span>Valor de referencia simulado</span><strong>{mxn(property.estimated_value)}</strong><small>{mxn(property.price_m2)} / m²</small></div>
-      <div className="gi-property-drawer-kpis"><div><span>Superficie</span><strong>{fmt(property.area_m2)} m²</strong></div><div><span>Tipo</span><strong>{property.type}</strong></div></div>
-      <div className="gi-property-drawer-actions"><button className={saved?'saved':''} onClick={toggle}><Bookmark size={13}/>{saved?' Guardada':' Guardar'}</button><button onClick={()=>go('location',property.location_id)}>Abrir ubicación <ArrowRight size={12}/></button></div>
-      <section className="gi-property-drawer-section"><span>CONTEXTO</span><p>Este activo es sintético y existe para probar el flujo de producto. El score sí se vincula al perfil territorial de su AGEB; superficie y valores son datos simulados.</p></section>
-      <section className="gi-property-drawer-section"><span>PRÓXIMAS CAPAS</span><div className="gi-property-roadmap"><p><Check size={12}/> Contexto territorial</p><p><Check size={12}/> Score de ubicación</p><p><Plus size={12}/> Predio catastral real</p><p><Plus size={12}/> Historial transaccional</p><p><Plus size={12}/> Propietario / contacto</p></div></section>
-    </aside>
-  </div>
+  return <aside className="gi-reonomy-drawer">
+    <div className="gi-reonomy-drawer-top">
+      <button onClick={onClose}><X size={15}/></button>
+      <div><span>{property.type}</span><small>{property.id}</small></div>
+      <button className={saved?'saved':''} onClick={toggle}><Bookmark size={14}/></button>
+    </div>
+    <div className="gi-reonomy-photo"><MapIcon size={30}/><span>PROPERTY INTELLIGENCE</span></div>
+    <div className="gi-reonomy-title">
+      <span>AGEB {property.location_id.slice(-4)} · Mazatlán</span>
+      <h2>{property.title}</h2>
+      <strong>{mxn(property.estimated_value)}</strong>
+      <small>{mxn(property.price_m2)} / m² · referencia simulada</small>
+    </div>
+    <div className="gi-reonomy-tabs"><button className="active">Resumen</button><button>Ubicación</button><button>Mercado</button><button>Notas</button></div>
+    <section className="gi-reonomy-section">
+      <header><span>BUILDING & LOT</span><b>{property.opportunity_score}/100</b></header>
+      <div className="gi-reonomy-specs">
+        <div><span>Tipo de activo</span><strong>{property.type}</strong></div>
+        <div><span>Superficie</span><strong>{fmt(property.area_m2)} m²</strong></div>
+        <div><span>Precio / m²</span><strong>{mxn(property.price_m2)}</strong></div>
+        <div><span>Valor de referencia</span><strong>{mxn(property.estimated_value)}</strong></div>
+      </div>
+    </section>
+    <section className="gi-reonomy-section">
+      <header><span>LOCATION INTELLIGENCE</span></header>
+      <div className="gi-location-score-row"><span>Oportunidad territorial</span><i><em style={{width:property.opportunity_score+'%'}}/></i><b>{property.opportunity_score}</b></div>
+      <p className="gi-reonomy-copy">El score se vincula con la AGEB observada. Superficie y valor del activo siguen siendo simulados hasta integrar información predial real.</p>
+      <button className="gi-reonomy-primary" onClick={()=>go('location',property.location_id)}>Abrir perfil de ubicación <ArrowRight size={12}/></button>
+    </section>
+    <section className="gi-reonomy-section">
+      <header><span>DATA COVERAGE</span></header>
+      <div className="gi-property-roadmap"><p><Check size={12}/> Demografía y territorio</p><p><Check size={12}/> Financiamiento municipal</p><p><Check size={12}/> Score de ubicación</p><p><Plus size={12}/> Predio / propietario real</p><p><Plus size={12}/> Transacciones y comparables</p></div>
+    </section>
+  </aside>
 }
 
 function Properties(){
@@ -620,39 +694,86 @@ function Properties(){
   const [type,setType]=useState('Todos')
   const [minScore,setMinScore]=useState(0)
   const [area,setArea]=useState('all')
+  const [query,setQuery]=useState('')
+  const [sort,setSort]=useState('score_desc')
+  const [view,setView]=useState('map')
   const [selected,setSelected]=useState(null)
   const [loading,setLoading]=useState(true)
+  const [filtersOpen,setFiltersOpen]=useState(true)
 
   const areaFilter=area==='small'?{maxArea:1200}:area==='medium'?{minArea:1200,maxArea:3000}:area==='large'?{minArea:3000}:{}
-
   useEffect(()=>{
     let active=true
-    setLoading(true)
-    getProperties(60,{type,minScore,...areaFilter}).then(r=>active&&setRows(r.rows||[])).finally(()=>active&&setLoading(false))
-    return()=>{active=false}
-  },[type,minScore,area])
+    const t=setTimeout(()=>{
+      setLoading(true)
+      getProperties(100,{type,minScore,...areaFilter,q:query,sort}).then(r=>{
+        if(!active)return
+        setRows(r.rows||[])
+        if(selected&&!((r.rows||[]).some(x=>x.id===selected.id)))setSelected(null)
+      }).finally(()=>active&&setLoading(false))
+    },120)
+    return()=>{active=false;clearTimeout(t)}
+  },[type,minScore,area,query,sort])
 
-  return <main className="gi-properties">
-    <section className="gi-properties-head"><div><span>PROPERTY INTELLIGENCE</span><h1>Oportunidades inmobiliarias.</h1><p>Prototipo de activos conectado al contexto territorial. La capa de propiedad es simulada hasta integrar información predial observada.</p></div><span className="gi-demo-badge">DATOS DE ACTIVO SIMULADOS</span></section>
+  const avgScore=rows.length?Math.round(rows.reduce((a,r)=>a+(Number(r.opportunity_score)||0),0)/rows.length):0
+  const avgPrice=rows.length?Math.round(rows.reduce((a,r)=>a+(Number(r.price_m2)||0),0)/rows.length):0
+  const totalValue=rows.reduce((a,r)=>a+(Number(r.estimated_value)||0),0)
 
-    <div className="gi-property-filterbar">
-      <div className="gi-property-filter-group"><span>Tipo</span>{['Todos','Terreno','Uso mixto','Comercial','Residencial'].map(t=><button key={t} className={type===t?'active':''} onClick={()=>setType(t)}>{t}</button>)}</div>
-      <label><span>Score mínimo</span><select value={minScore} onChange={e=>setMinScore(Number(e.target.value))}><option value="0">Todos</option><option value="60">60+</option><option value="70">70+</option><option value="80">80+</option></select></label>
-      <label><span>Superficie</span><select value={area} onChange={e=>setArea(e.target.value)}><option value="all">Todas</option><option value="small">&lt; 1,200 m²</option><option value="medium">1,200–3,000 m²</option><option value="large">3,000+ m²</option></select></label>
-      <b>{rows.length} activos</b>
+  return <main className="gi-reonomy">
+    <div className="gi-reonomy-searchbar">
+      <div className="gi-reonomy-search"><Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar por AGEB, ID o tipo de activo"/>{query&&<button onClick={()=>setQuery('')}><X size={13}/></button>}</div>
+      <button className="gi-reonomy-market"><MapPin size={13}/> Mazatlán, Sinaloa <ChevronDown size={12}/></button>
+      <div className="gi-reonomy-view"><button className={view==='map'?'active':''} onClick={()=>setView('map')}><MapIcon size={13}/> Mapa</button><button className={view==='table'?'active':''} onClick={()=>setView('table')}><ListFilter size={13}/> Tabla</button></div>
     </div>
 
-    {loading?<div className="gi-property-skeleton">{Array.from({length:9},(_,i)=><i key={i}/>)}</div>:<section className="gi-property-grid">
-      {rows.map(p=><article key={p.id} className="gi-property-card">
-        <button className="gi-property-visual" onClick={()=>setSelected(p)}><span>{p.type}</span><b>{p.opportunity_score}/100</b><MapIcon size={28}/><em>Vista de activo</em></button>
-        <div className="gi-property-body"><span>{p.id}</span><h3>{p.title}</h3><p>AGEB {p.location_id.slice(-4)} · Mazatlán, Sinaloa</p>
-          <div><span><Ruler size={12}/>{fmt(p.area_m2)} m²</span><span>{mxn(p.price_m2)}/m²</span></div>
-          <strong>{mxn(p.estimated_value)}</strong>
-          <button onClick={()=>setSelected(p)}>Ver oportunidad <ArrowRight size={12}/></button>
+    <div className="gi-reonomy-toolbar">
+      <button className={filtersOpen?'active':''} onClick={()=>setFiltersOpen(v=>!v)}><ListFilter size={13}/> Filtros</button>
+      <button><Layers3 size={13}/> Capas</button>
+      <button><Ruler size={13}/> Dibujar área</button>
+      <span>{rows.length} resultados</span>
+      <label>Ordenar <select value={sort} onChange={e=>setSort(e.target.value)}><option value="score_desc">Mayor oportunidad</option><option value="value_desc">Mayor valor</option><option value="price_asc">Menor $/m²</option><option value="area_desc">Mayor superficie</option></select></label>
+    </div>
+
+    <div className={'gi-reonomy-shell '+(!filtersOpen?'filters-collapsed ':'')+(selected?'has-drawer':'')}>
+      {filtersOpen&&<aside className="gi-reonomy-filters">
+        <div className="gi-filter-title"><strong>Filtros</strong><button onClick={()=>{setType('Todos');setMinScore(0);setArea('all');setQuery('')}}>Limpiar</button></div>
+        <section><span>TIPO DE ACTIVO</span>{['Todos','Terreno','Uso mixto','Comercial','Residencial'].map(t=><button key={t} className={type===t?'active':''} onClick={()=>setType(t)}>{t}<i>{t==='Todos'?rows.length:''}</i></button>)}</section>
+        <section><span>OPPORTUNITY SCORE</span><select value={minScore} onChange={e=>setMinScore(Number(e.target.value))}><option value="0">Cualquier score</option><option value="60">60 o más</option><option value="70">70 o más</option><option value="80">80 o más</option></select></section>
+        <section><span>SUPERFICIE</span><select value={area} onChange={e=>setArea(e.target.value)}><option value="all">Cualquier superficie</option><option value="small">Menos de 1,200 m²</option><option value="medium">1,200–3,000 m²</option><option value="large">3,000+ m²</option></select></section>
+        <section><span>SEÑALES</span><label><input type="checkbox" defaultChecked/> Alta oportunidad</label><label><input type="checkbox"/> Crecimiento territorial</label><label><input type="checkbox"/> Expansión urbana</label></section>
+        <div className="gi-filter-note"><Info size={12}/><p>Los activos son sintéticos; los perfiles territoriales provienen de fuentes observadas.</p></div>
+      </aside>}
+
+      <section className="gi-reonomy-results">
+        <div className="gi-result-summary">
+          <div><span>RESULTADOS</span><strong>{rows.length}</strong></div>
+          <div><span>SCORE MEDIO</span><strong>{avgScore}</strong></div>
+          <div><span>PRECIO MEDIO</span><strong>{mxn(avgPrice)}<small>/m²</small></strong></div>
+          <div><span>VALOR EN VISTA</span><strong>{mxn(totalValue)}</strong></div>
         </div>
-      </article>)}
-    </section>}
-    {selected&&<PropertyDrawer property={selected} onClose={()=>setSelected(null)}/>}
+        {loading?<div className="gi-reonomy-loading">{Array.from({length:8},(_,i)=><i key={i}/>)}</div>:
+        <div className="gi-result-list">
+          {rows.map(p=><button key={p.id} className={'gi-result-row '+(selected?.id===p.id?'active':'')} onClick={()=>setSelected(p)}>
+            <div className="gi-result-thumb"><Building2 size={18}/><span>{p.type}</span></div>
+            <div className="gi-result-main"><span>{p.id}</span><strong>{p.title}</strong><small>AGEB {p.location_id.slice(-4)} · Mazatlán</small><div><em>{fmt(p.area_m2)} m²</em><em>{mxn(p.price_m2)}/m²</em></div></div>
+            <div className="gi-result-value"><b>{mxn(p.estimated_value)}</b><span>Score {p.opportunity_score}</span><i><em style={{width:p.opportunity_score+'%'}}/></i></div>
+          </button>)}
+          {!rows.length&&<div className="gi-no-results"><Search size={20}/><strong>Sin resultados</strong><span>Ajusta los filtros o la búsqueda.</span></div>}
+        </div>}
+      </section>
+
+      <section className={'gi-reonomy-mapstage '+(view==='table'?'table-mode':'')}>
+        {view==='map'?<>
+          <PropertyMap rows={rows} selected={selected} onSelect={setSelected}/>
+          <div className="gi-map-floating"><span><i className="hi"/> 80+</span><span><i className="mid"/> 65–79</span><span><i/> &lt;65</span></div>
+          <div className="gi-map-counter">{rows.length} activos en vista</div>
+        </>:<div className="gi-property-table">
+          <div className="gi-property-table-head"><span>Activo</span><span>Tipo</span><span>Área</span><span>$/m²</span><span>Valor</span><span>Score</span></div>
+          {rows.map(p=><button key={p.id} onClick={()=>setSelected(p)}><span><b>{p.title}</b><small>{p.id}</small></span><span>{p.type}</span><span>{fmt(p.area_m2)} m²</span><span>{mxn(p.price_m2)}</span><span>{mxn(p.estimated_value)}</span><strong>{p.opportunity_score}</strong></button>)}
+        </div>}
+      </section>
+      {selected&&<PropertyDrawer property={selected} onClose={()=>setSelected(null)}/>}
+    </div>
   </main>
 }
 
