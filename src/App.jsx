@@ -624,7 +624,7 @@ function PropertyMap({rows=[],selected,onSelect}){
           const group=byId.get(id)||[]
           const maxScore=Math.max(...group.map(x=>Number(x.opportunity_score)||0),0)
           const active=selected&&String(selected.location_id)===id
-          return {color:active?'#083f47':'#fff',weight:active?2:1,fillColor:maxScore>=80?'#0b777d':maxScore>=65?'#5ca7a7':'#b8d7d5',fillOpacity:active?.92:.78}
+          return {color:active?'#083f47':'#fff',weight:active?2:1,fillColor:maxScore>=80?'#0b777d':maxScore>=65?'#5ca7a7':'#b8d7d5',fillOpacity:active ? .92 : .78}
         },
         onEachFeature:(ft,l)=>{
           const id=String(ft.properties?.cvegeo_ageb||ft.properties?.CVEGEO||'').slice(0,13)
