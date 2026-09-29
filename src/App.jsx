@@ -12,6 +12,8 @@ import {
   getMarketPulse,getMarketSummary,getDistricts,getDistrict,getProperties,searchAll,getOverview,getPropertyDetail
 } from './apiClient'
 import './app.css'
+import { Landing, SiteHeader, SiteFooter, DataPlatform } from './Experience'
+import './experience.css'
 
 const fmt=(v,d=0)=>Number.isFinite(Number(v))
   ? Number(v).toLocaleString('es-MX',{minimumFractionDigits:d,maximumFractionDigits:d})
@@ -59,37 +61,20 @@ function go(page,id){
   location.hash=(page==='location'||page==='district')&&id?page+'/'+encodeURIComponent(id):page
 }
 
-function Header({page}){
-  return <header className="gi-header gi-header-v2">
-    <button className="gi-brand gi-brand-v2" onClick={()=>go('home')}>
-      <span>G</span>
-      <div><strong>GROWA</strong><small>PROPERTY INTELLIGENCE</small></div>
-    </button>
-    <nav className="gi-nav gi-nav-v2">
-      <button className={page==='locations'||page==='district'||page==='location'?'active':''} onClick={()=>go('locations')}><MapPin size={15}/> Explorar</button>
-      <button className={page==='properties'?'active':''} onClick={()=>go('properties')}><Building2 size={15}/> Propiedades</button>
-      <button className={page==='market'?'active':''} onClick={()=>go('market')}><TrendingUp size={15}/> Mercado</button>
-      <button className={page==='platform'?'active':''} onClick={()=>go('platform')}><Database size={15}/> Datos & producto</button>
-    </nav>
-    <div className="gi-header-actions gi-header-actions-v2">
-      <span className="gi-territory-chip"><MapPin size={13}/> Mazatlán, Sinaloa</span>
-      <button className="gi-demo" onClick={()=>go('properties')}>Abrir workspace <ArrowRight size={13}/></button>
-    </div>
-  </header>
-}
-
 function SearchBox({large=false,onSelect}){
   const [q,setQ]=useState('')
   const [rows,setRows]=useState([])
   const [busy,setBusy]=useState(false)
   useEffect(()=>{
     if(!q.trim()){setRows([]);return}
+    let active=true
     const t=setTimeout(async()=>{
       setBusy(true)
-      try{const r=await searchAll(q,7);setRows(r.rows||[])}
-      finally{setBusy(false)}
+      try{const r=await searchAll(q,7);if(active)setRows(r.rows||[])}
+      catch{if(active)setRows([])}
+      finally{if(active)setBusy(false)}
     },180)
-    return()=>clearTimeout(t)
+    return()=>{active=false;clearTimeout(t)}
   },[q])
   const choose=row=>{
     setQ('')
@@ -114,170 +99,13 @@ function SearchBox({large=false,onSelect}){
   </div>
 }
 
-function Home(){
-  const [metric,setMetric]=useState('opportunity')
-  const [ranking,setRanking]=useState({rows:[],methodology:''})
-  const [districts,setDistricts]=useState([])
-  const [loading,setLoading]=useState(true)
-  useEffect(()=>{
-    let active=true
-    setLoading(true)
-    getRankings(metric,10).then(r=>active&&setRanking(r)).finally(()=>active&&setLoading(false))
-    return()=>{active=false}
-  },[metric])
-  useEffect(()=>{
-    let active=true
-    getDistricts().then(r=>active&&setDistricts((r.rows||[]).slice(0,6))).catch(()=>{})
-    return()=>{active=false}
-  },[])
-  const def=RANK_METRICS.find(x=>x.key===metric)||RANK_METRICS[0]
-  const valueOf=row=>({
-    opportunity:row.opportunity_score,
-    population:row.population,
-    households:row.households,
-    adults:row.adult_share,
-    mobility:row.recent_mobility_share,
-  }[metric])
-  return <main className="gi-home">
-    <section className="gi-hero">
-      <div className="gi-map-pattern">{Array.from({length:12},(_,i)=><i key={i} className={'r'+(i+1)}/>)}</div>
-      <div className="gi-hero-inner">
-        <span className="gi-kicker">GROWA · LOCATION INTELLIGENCE</span>
-        <h1>Insights Atlas</h1>
-        <p>Inteligencia de ubicación para evaluar AGEB, distritos, mercados y oportunidades inmobiliarias en Mazatlán.</p>
-        <SearchBox large/>
-      </div>
-    </section>
-
-    <section className="gi-ranking">
-      <div className="gi-ranking-head">
-        <div><h2>Top 10 zonas</h2><p>Explora y compara AGEB urbanas con indicadores territoriales.</p></div>
-        <div className="gi-market-pills"><button className="active">Mazatlán</button><button>Mercado urbano</button></div>
-        <button className="gi-add" onClick={()=>go('locations')}>+ Añadir una zona</button>
-      </div>
-      <div className="gi-metric-tabs">
-        {RANK_METRICS.map(m=><button key={m.key} className={metric===m.key?'active':''} onClick={()=>setMetric(m.key)}>{m.label}</button>)}
-      </div>
-      {loading?<div className="gi-loading-grid">{Array.from({length:10},(_,i)=><i key={i}/>)}</div>:
-      <div className="gi-ranking-grid">
-        {(ranking.rows||[]).map((row,i)=><button key={row.id} className="gi-rank-row" onClick={()=>go('location',row.id)}>
-          <span>{String(i+1).padStart(2,'0')}</span>
-          <div><strong>{row.label||('AGEB '+row.id.slice(-4))}</strong><small>Mazatlán, Sinaloa</small></div>
-          <em>{def.note}</em>
-          <b>{def.format(valueOf(row))}</b>
-        </button>)}
-      </div>}
-      <div className="gi-method"><Info size={13}/><span>{ranking.methodology||'Indicadores territoriales descriptivos.'}</span></div>
-    </section>
-
-    {!!districts.length&&<section className="gi-home-districts">
-      <div className="gi-section-head"><div><span>TERRITORIOS</span><h2>Distritos de Mazatlán</h2></div><button onClick={()=>go('locations')}>Ver todos <ArrowRight size={12}/></button></div>
-      <div className="gi-district-strip">
-        {districts.map(d=><button key={d.slug} onClick={()=>go('district',d.slug)}>
-          <span>{d.ageb_count||'—'} AGEB</span><strong>{d.name}</strong>
-          <div><em>{d.population?fmt(d.population)+' hab.':'CODESIN'}</em>{d.opportunity_score!==null&&d.opportunity_score!==undefined?<b>{d.opportunity_score}/100</b>:null}</div>
-        </button>)}
-      </div>
-    </section>}
-
-    <section className="gi-intel-strip">
-      <div><span>01</span><strong>Compara ubicaciones</strong><p>Contrasta población, hogares, movilidad y señales de mercado.</p></div>
-      <div><span>02</span><strong>Evalúa contexto</strong><p>Integra demografía, vivienda, actividad y financiamiento.</p></div>
-      <div><span>03</span><strong>Detecta oportunidades</strong><p>Convierte datos territoriales en un flujo de prospección.</p></div>
-    </section>
-  </main>
-}
-
-function Platform(){
-  const [overview,setOverview]=useState(null)
-  useEffect(()=>{
-    let active=true
-    getOverview().then(r=>active&&setOverview(r)).catch(()=>{})
-    return()=>{active=false}
-  },[])
-  const coverage=overview?.coverage||{}
-  const top=overview?.top_locations?.[0]
-  const market=overview?.market||{}
-  const latest=market?.latest_month||{}
-  return <main className="gi-platform-v2">
-    <section className="gp-hero">
-      <div className="gp-hero-copy">
-        <span className="gp-eyebrow">GROWA · REAL ESTATE INTELLIGENCE</span>
-        <h1>Un workspace para entender <em>propiedad, ubicación y mercado.</em></h1>
-        <p>La plataforma conecta información territorial, demográfica y de vivienda para investigar zonas, filtrar oportunidades y construir perfiles de mercado sin saltar entre distintas fuentes.</p>
-        <div className="gp-hero-actions">
-          <button className="primary" onClick={()=>go('properties')}>Explorar propiedades <ArrowRight size={15}/></button>
-          <button onClick={()=>go('locations')}>Abrir Location Intelligence</button>
-        </div>
-      </div>
-      <div className="gp-hero-product">
-        <div className="gp-product-top"><span>LIVE WORKSPACE</span><b>Mazatlán</b></div>
-        <div className="gp-product-search"><Search size={14}/><span>AGEB, zona, activo o distrito</span></div>
-        <div className="gp-product-map">
-          {Array.from({length:18},(_,i)=><i key={i} style={{left:(8+(i*37)%84)+'%',top:(12+(i*23)%74)+'%',width:(18+(i*7)%28)+'px',height:(14+(i*11)%25)+'px'}}/>)}
-          <span className="hot a">78</span><span className="hot b">84</span><span className="hot c">71</span>
-        </div>
-        <div className="gp-product-foot"><span><i/> Opportunity layer</span><b>{coverage.locations?fmt(coverage.locations)+' zonas':'Cargando…'}</b></div>
-      </div>
-    </section>
-
-    <section className="gp-kpis">
-      <article><span>AGEB / ZONAS</span><strong>{coverage.locations?fmt(coverage.locations):'—'}</strong><p>ubicaciones con perfil territorial</p></article>
-      <article><span>DISTRITOS</span><strong>{coverage.districts||'—'}</strong><p>agregados CODESIN</p></article>
-      <article><span>TOP OPPORTUNITY</span><strong>{top?.opportunity_score??'—'}</strong><p>{top?('AGEB '+top.id.slice(-4)):'score territorial'}</p></article>
-      <article><span>FINANCIAMIENTOS · ÚLTIMO MES</span><strong>{fmt(latest.actions)}</strong><p>{market?.observed_through||'SNIIV / SEDATU'}</p></article>
-    </section>
-
-    <section className="gp-coverage-line">
-      <div><Users size={18}/><span>Población cubierta</span><strong>{fmt(coverage.population)}</strong></div>
-      <div><HomeIcon size={18}/><span>Hogares cubiertos</span><strong>{fmt(coverage.households)}</strong></div>
-      <div><Target size={18}/><span>Zonas con score 70+</span><strong>{fmt(coverage.high_opportunity_locations)}</strong></div>
-    </section>
-
-    <section className="gp-modules">
-      <header><div><span>PRODUCTOS</span><h2>Investiga desde lo macro hasta el activo.</h2></div><p>Un flujo continuo: mercado → zona → activo → perfil.</p></header>
-      <div className="gp-module-grid">
-        <button className="gp-module featured" onClick={()=>go('properties')}>
-          <div className="gp-module-visual property"><div className="fake-side"/><div className="fake-map"><i/><i/><i/><i/><i/><i/></div></div>
-          <span>01 · PROPERTY INTELLIGENCE</span><h3>Búsqueda de activos y oportunidades</h3>
-          <p>Filtros, mapa, tabla, scoring territorial, fichas de activo y preparación para predios, propietarios y comparables.</p>
-          <b>Abrir workspace <ArrowRight size={14}/></b>
-        </button>
-        <button className="gp-module" onClick={()=>go('locations')}>
-          <div className="gp-module-icon"><MapPin size={22}/></div>
-          <span>02 · LOCATION INTELLIGENCE</span><h3>Perfiles territoriales</h3>
-          <p>AGEB y distritos con población, hogares, movilidad y señales comparables de contexto.</p>
-          <b>Explorar zonas <ArrowRight size={14}/></b>
-        </button>
-        <button className="gp-module" onClick={()=>go('market')}>
-          <div className="gp-module-icon"><TrendingUp size={22}/></div>
-          <span>03 · MARKET INTELLIGENCE</span><h3>Demanda y financiamiento</h3>
-          <p>Serie mensual, estructura de financiamiento, segmentos y profundidad de demanda municipal.</p>
-          <b>Ver mercado <ArrowRight size={14}/></b>
-        </button>
-      </div>
-    </section>
-
-    <section className="gp-data-stack">
-      <div className="gp-data-copy"><span>DATA FOUNDATION</span><h2>La ventaja está en la capa de datos.</h2><p>Growa separa dato observado, indicador derivado y activo simulado para que cada resultado conserve trazabilidad.</p></div>
-      <div className="gp-data-table">
-        <div><span>INEGI · Censo 2020</span><b>AGEB</b><em>Demografía y vivienda</em><i className="live">Observado</i></div>
-        <div><span>CODESIN</span><b>Distrito</b><em>Polígonos territoriales</em><i className="live">Observado</i></div>
-        <div><span>SNIIV / SEDATU</span><b>Municipio</b><em>Financiamiento de vivienda</em><i className="live">Observado</i></div>
-        <div><span>Growa Territorial</span><b>AGEB / distrito</b><em>Scores y agregados</em><i>Derivado</i></div>
-        <div><span>Property layer</span><b>Activo</b><em>Prototipo para flujo de producto</em><i className="demo">Simulado</i></div>
-      </div>
-    </section>
-  </main>
-}
-
 function LocationMapExplorer({mode,rows,metric='opportunity'}){
   const node=useRef(null), mapRef=useRef(null), layerRef=useRef(null)
   const geometryUrl=mode==='district'?'/data/codesin-districts.geojson':'/data/ageb-geometry-2020.geojson'
 
   useEffect(()=>{
     if(!node.current||mapRef.current)return
-    const map=L.map(node.current,{zoomControl:false,attributionControl:false,minZoom:9,maxZoom:17})
+    const map=L.map(node.current,{zoomAnimation:false,fadeAnimation:false,markerZoomAnimation:false,zoomControl:false,attributionControl:true,minZoom:9,maxZoom:17})
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'}).addTo(map)
     L.control.zoom({position:'bottomright'}).addTo(map)
     map.setView([23.245,-106.425],11)
@@ -373,7 +201,7 @@ function Locations(){
   const toggle=id=>setCompare(prev=>prev.includes(id)?prev.filter(x=>x!==id):prev.length>=3?prev:[...prev,id])
   const count=mode==='ageb'?rows.length:districts.length
 
-  return <main className="gi-locations">
+  return <main tabIndex={-1} className="gi-locations">
     <section className="gi-locations-top">
       <div><span>LOCATION INTELLIGENCE</span><h1>Explora ubicaciones.</h1><p>Analiza Mazatlán en dos escalas: AGEB urbana para detalle fino y distritos CODESIN para lectura estratégica.</p></div>
       <div className="gi-search compact"><div className="gi-search-line"><Search size={14}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder={mode==='ageb'?'Buscar AGEB':'Buscar distrito'}/></div></div>
@@ -428,7 +256,7 @@ function DistrictProfile({slug}){
   if(!data)return <div className="gi-page-loading"><i/> Cargando distrito…</div>
   const d=data.district||{}
   const locations=data.locations||[]
-  return <main className="gi-profile gi-district-profile">
+  return <main tabIndex={-1} className="gi-profile gi-district-profile">
     <div className="gi-profile-crumb"><button onClick={()=>go('locations')}>Ubicaciones</button><span>/</span><b>{d.name}</b></div>
     <section className="gi-profile-hero">
       <div><span>DISTRITO CODESIN · MAZATLÁN</span><h1>{d.name}</h1><p>{fmt(d.ageb_count)} AGEB integradas · lectura territorial agregada</p></div>
@@ -461,7 +289,7 @@ function MiniMap({id}){
       if(cancelled||!node.current)return
       const feature=(geo.features||[]).find(f=>String(f.properties?.cvegeo_ageb||f.properties?.CVEGEO||'').slice(0,13)===id)
       if(!feature)return
-      const map=L.map(node.current,{zoomControl:false,attributionControl:false,scrollWheelZoom:false})
+      const map=L.map(node.current,{zoomAnimation:false,fadeAnimation:false,markerZoomAnimation:false,zoomControl:false,attributionControl:true,scrollWheelZoom:false})
       L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'}).addTo(map)
       const layer=L.geoJSON(feature,{style:{color:'#0a8588',weight:2,fillColor:'#76c4c0',fillOpacity:.35}}).addTo(map)
       map.fitBounds(layer.getBounds(),{padding:[26,26],maxZoom:14})
@@ -493,7 +321,7 @@ function LocationProfile({id}){
   if(!data)return <div className="gi-page-loading"><i/> Cargando perfil territorial…</div>
   const r=data.location
   const c=r.score_components||{}
-  return <main className="gi-profile">
+  return <main tabIndex={-1} className="gi-profile">
     <div className="gi-profile-crumb"><button onClick={()=>go('locations')}>Ubicaciones</button><span>/</span><b>AGEB {r.id.slice(-4)}</b></div>
     <section className="gi-profile-hero">
       <div><span>LOCATION PROFILE · MAZATLÁN</span><h1>AGEB {r.id.slice(-4)}</h1><p>{r.id} · perfil territorial urbano</p></div>
@@ -578,10 +406,10 @@ function Market(){
   const maxModal=Math.max(...modalities.map(x=>Number(x.actions_h1_2026)||0),1)
   const maxSegment=Math.max(...segments.map(x=>Number(x.actions_h1_2026)||0),1)
   const h1=data.h1||{}
-  return <main className="gi-market-v2">
+  return <main tabIndex={-1} className="gi-market-v2">
     <aside className="gm-side">
       <div><span>MARKET</span><h3>Mazatlán</h3><small>Sinaloa · México</small></div>
-      <nav><button className="active"><BarChart3 size={15}/> Resumen</button><button><TrendingUp size={15}/> Financiamiento</button><button><HomeIcon size={15}/> Vivienda</button><button><Users size={15}/> Demanda</button></nav>
+      <nav><button onClick={()=>document.querySelector('.gm-head')?.scrollIntoView({behavior:'smooth'})}><BarChart3 size={15}/> Resumen</button><button onClick={()=>document.querySelector('.gm-trend-card')?.scrollIntoView({behavior:'smooth'})}><TrendingUp size={15}/> Financiamiento</button><button onClick={()=>{setTab('segments');document.querySelector('.gm-structure')?.scrollIntoView({behavior:'smooth'})}}><HomeIcon size={15}/> Vivienda</button><button onClick={()=>document.querySelector('.gm-grid.lower')?.scrollIntoView({behavior:'smooth'})}><Users size={15}/> Demanda</button></nav>
       <section><span>COBERTURA</span><strong>{data.observed_through||'Último periodo'}</strong><p>Los indicadores de esta vista son municipales y no se imputan automáticamente a una AGEB.</p></section>
     </aside>
 
@@ -650,16 +478,17 @@ function Market(){
   </main>
 }
 
-function PropertyMap({rows=[],selected,onSelect}){
+function PropertyMap({rows=[],selected,onSelect,metric='opportunity_score'}){
   const node=useRef(null),mapRef=useRef(null),layerRef=useRef(null)
   useEffect(()=>{
     if(!node.current||mapRef.current)return
-    const map=L.map(node.current,{zoomControl:false,attributionControl:false,minZoom:9,maxZoom:18})
+    const map=L.map(node.current,{zoomAnimation:false,fadeAnimation:false,markerZoomAnimation:false,zoomControl:false,attributionControl:true,minZoom:9,maxZoom:18})
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'}).addTo(map)
     L.control.zoom({position:'bottomright'}).addTo(map)
     map.setView([23.245,-106.425],11)
     mapRef.current=map
-    return()=>{map.remove();mapRef.current=null}
+    const resize=new ResizeObserver(()=>map.invalidateSize());resize.observe(node.current)
+    return()=>{resize.disconnect();map.remove();mapRef.current=null}
   },[])
   useEffect(()=>{
     const map=mapRef.current
@@ -679,7 +508,8 @@ function PropertyMap({rows=[],selected,onSelect}){
         style:ft=>{
           const id=String(ft.properties?.cvegeo_ageb||ft.properties?.CVEGEO||'').slice(0,13)
           const group=byId.get(id)||[]
-          const maxScore=Math.max(...group.map(x=>Number(x.opportunity_score)||0),0)
+          const raw=Math.max(...group.map(x=>Number(x[metric])||0),0)
+          const maxScore=metric==='price_m2'?Math.min(100,raw/35000*100):metric==='area_m2'?Math.min(100,raw/5000*100):raw
           const active=selected&&String(selected.location_id)===id
           return {color:active?'#083f47':'#fff',weight:active?2:1,fillColor:maxScore>=80?'#0b777d':maxScore>=65?'#5ca7a7':'#b8d7d5',fillOpacity:active ? .92 : .78}
         },
@@ -693,10 +523,10 @@ function PropertyMap({rows=[],selected,onSelect}){
         }
       }).addTo(map)
       layerRef.current=layer
-      if(layer.getBounds().isValid())map.fitBounds(layer.getBounds(),{padding:[24,24]})
+      if(!selected&&layer.getBounds().isValid())map.fitBounds(layer.getBounds(),{padding:[24,24]})
     }).catch(()=>{})
     return()=>{cancelled=true}
-  },[rows,selected,onSelect])
+  },[rows,selected,onSelect,metric])
   return <div className="gi-property-map" ref={node}/>
 }
 
@@ -720,9 +550,9 @@ function PropertyDrawer({property,onClose}){
   const bench=detail?.benchmarks||{}
   return <aside className="gi-reonomy-drawer gi-property-detail-v2">
     <div className="gi-reonomy-drawer-top">
-      <button onClick={onClose}><X size={17}/></button>
+      <button onClick={onClose} aria-label="Cerrar ficha"><X size={17}/></button>
       <div><span>{property.type}</span><small>{property.id}</small></div>
-      <button className={saved?'saved':''} onClick={toggle}><Bookmark size={16}/></button>
+      <button className={saved?'saved':''} onClick={toggle} aria-label={saved?'Quitar de guardados':'Guardar propiedad'} aria-pressed={saved}><Bookmark size={16}/></button>
     </div>
     <div className="gi-reonomy-photo"><MapIcon size={34}/><span>PROPERTY INTELLIGENCE</span><b>{property.opportunity_score}</b></div>
     <div className="gi-reonomy-title">
@@ -799,8 +629,24 @@ function PropertyDrawer({property,onClose}){
   </aside>
 }
 
+function readStored(key,fallback){try{const data=JSON.parse(localStorage.getItem(key));return data??fallback}catch{return fallback}}
+function exportProperties(rows){
+  const keys=['id','type','location_id','area_m2','price_m2','estimated_value','opportunity_score']
+  const cell=v=>'"'+String(v??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"'
+  const csv='\ufeff'+[keys.concat('naturaleza'),...rows.map(r=>keys.map(k=>r[k]).concat('Activo simulado; contexto territorial observado'))].map(r=>r.map(cell).join(',')).join('\r\n')
+  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}))
+  const a=document.createElement('a');a.href=url;a.download='Growa_propiedades.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
+}
+
 function Properties(){
-  const [rows,setRows]=useState([])
+  const [allRows,setRows]=useState([])
+  const [savedOnly,setSavedOnly]=useState(false)
+  const [savedIds,setSavedIds]=useState(()=>readStored('growa_saved_properties',[]))
+  const [savedSearch,setSavedSearch]=useState(()=>readStored('growa_property_search_v1',null))
+  const [toast,setToast]=useState('')
+  const [error,setError]=useState('')
+  const [mapMetric,setMapMetric]=useState('opportunity_score')
+  const rows=savedOnly?allRows.filter(p=>savedIds.includes(p.id)):allRows
   const [type,setType]=useState('Todos')
   const [minScore,setMinScore]=useState(0)
   const [area,setArea]=useState('all')
@@ -810,7 +656,7 @@ function Properties(){
   const [view,setView]=useState('map')
   const [selected,setSelected]=useState(null)
   const [loading,setLoading]=useState(true)
-  const [filtersOpen,setFiltersOpen]=useState(true)
+  const [filtersOpen,setFiltersOpen]=useState(()=>window.innerWidth>980)
   const [layersOpen,setLayersOpen]=useState(false)
 
   const areaFilter=area==='small'?{maxArea:1200}:area==='medium'?{minArea:1200,maxArea:3000}:area==='large'?{minArea:3000}:{}
@@ -818,12 +664,12 @@ function Properties(){
   useEffect(()=>{
     let active=true
     const t=setTimeout(()=>{
-      setLoading(true)
+      setLoading(true);setError('')
       getProperties(100,{type,minScore,...areaFilter,...priceFilter,q:query,sort}).then(r=>{
         if(!active)return
         setRows(r.rows||[])
         if(selected&&!((r.rows||[]).some(x=>x.id===selected.id)))setSelected(null)
-      }).finally(()=>active&&setLoading(false))
+      }).catch(()=>{if(active){setError('No se pudieron cargar los activos. Ajusta un filtro para volver a intentar.');setRows([])}}).finally(()=>active&&setLoading(false))
     },120)
     return()=>{active=false;clearTimeout(t)}
   },[type,minScore,area,price,query,sort])
@@ -831,30 +677,34 @@ function Properties(){
   const avgScore=rows.length?Math.round(rows.reduce((a,r)=>a+(Number(r.opportunity_score)||0),0)/rows.length):0
   const avgPrice=rows.length?Math.round(rows.reduce((a,r)=>a+(Number(r.price_m2)||0),0)/rows.length):0
   const totalValue=rows.reduce((a,r)=>a+(Number(r.estimated_value)||0),0)
+  useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(''),3500);return()=>clearTimeout(timer)},[toast])
+  const saveSearch=()=>{const data={type,minScore,area,price,query,sort};try{localStorage.setItem('growa_property_search_v1',JSON.stringify(data));setSavedSearch(data);setToast('Búsqueda guardada en este navegador.')}catch{setToast('No fue posible guardar en este navegador.')}}
+  const restoreSearch=()=>{if(!savedSearch)return;setType(savedSearch.type);setMinScore(savedSearch.minScore);setArea(savedSearch.area);setPrice(savedSearch.price);setQuery(savedSearch.query);setSort(savedSearch.sort);setSavedOnly(false);setToast('Búsqueda recuperada.')}
   const clear=()=>{setType('Todos');setMinScore(0);setArea('all');setPrice('all');setQuery('')}
 
-  return <main className="gi-reonomy gi-reonomy-v2">
+  return <main tabIndex={-1} className="gi-reonomy gi-reonomy-v2">
     <div className="gr-searchbar">
-      <div className="gr-search"><Search size={17}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar AGEB, tipo de activo o identificador"/>{query&&<button onClick={()=>setQuery('')}><X size={14}/></button>}</div>
-      <button className="gr-location"><MapPin size={15}/> Mazatlán, Sinaloa <ChevronDown size={13}/></button>
-      <button className="gr-save"><Bookmark size={14}/> Guardar búsqueda</button>
+      <div className="gr-search"><Search size={17}/><input aria-label="Buscar propiedades" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar AGEB, tipo de activo o identificador"/>{query&&<button onClick={()=>setQuery('')}><X size={14}/></button>}</div>
+      <span className="gr-location"><MapPin size={15}/> Mazatlán, Sinaloa</span>
+      <button className="gr-save" onClick={saveSearch} aria-label="Guardar búsqueda"><Bookmark size={14}/> Guardar búsqueda</button>
     </div>
 
     <div className="gr-toolbar">
       <div>
         <button className={filtersOpen?'active':''} onClick={()=>setFiltersOpen(v=>!v)}><ListFilter size={15}/> Filtros</button>
         <button className={layersOpen?'active':''} onClick={()=>setLayersOpen(v=>!v)}><Layers3 size={15}/> Capas</button>
-        <button><Ruler size={15}/> Dibujar área</button>
+        <button className={savedOnly?'active':''} onClick={()=>{setSavedIds(readStored('growa_saved_properties',[]));setSavedOnly(v=>!v)}}><Bookmark size={15}/> Guardados</button>
       </div>
       <span><b>{rows.length}</b> resultados en Mazatlán</span>
       <div className="gr-view">
         <button className={view==='map'?'active':''} onClick={()=>setView('map')}><MapIcon size={14}/> Mapa</button>
+        <button className={'gr-mobile-only '+(view==='list'?'active':'')} onClick={()=>setView('list')}><LayoutGrid size={14}/> Lista</button>
         <button className={view==='table'?'active':''} onClick={()=>setView('table')}><ListFilter size={14}/> Tabla</button>
       </div>
       <label>Ordenar <select value={sort} onChange={e=>setSort(e.target.value)}><option value="score_desc">Mayor oportunidad</option><option value="value_desc">Mayor valor</option><option value="price_asc">Menor $/m²</option><option value="area_desc">Mayor superficie</option></select></label>
     </div>
 
-    <div className={'gr-shell '+(!filtersOpen?'filters-collapsed ':'')+(selected?'has-drawer':'')}>
+    <div className={'gr-shell '+(view==='table'?'table-mode ':view==='list'?'list-mode ':'')+(!filtersOpen?'filters-collapsed ':'')+(selected?'has-drawer':'')}>
       {filtersOpen&&<aside className="gr-filters">
         <div className="gr-filter-head"><div><strong>Filtros</strong><span>Construye tu universo objetivo</span></div><button onClick={clear}>Limpiar</button></div>
         <section>
@@ -867,20 +717,14 @@ function Properties(){
         </section>
         <section>
           <span>SUPERFICIE DE ACTIVO</span>
-          <select value={area} onChange={e=>setArea(e.target.value)}><option value="all">Cualquier superficie</option><option value="small">Menos de 1,200 m²</option><option value="medium">1,200–3,000 m²</option><option value="large">Más de 3,000 m²</option></select>
+          <select aria-label="Superficie de activo" value={area} onChange={e=>setArea(e.target.value)}><option value="all">Cualquier superficie</option><option value="small">Menos de 1,200 m²</option><option value="medium">1,200–3,000 m²</option><option value="large">Más de 3,000 m²</option></select>
         </section>
         <section>
           <span>PRECIO DE REFERENCIA / m²</span>
-          <select value={price} onChange={e=>setPrice(e.target.value)}><option value="all">Cualquier precio</option><option value="low">Menos de $18,000</option><option value="mid">$18,000 – $26,000</option><option value="high">Más de $26,000</option></select>
+          <select aria-label="Precio por metro cuadrado" value={price} onChange={e=>setPrice(e.target.value)}><option value="all">Cualquier precio</option><option value="low">Menos de $18,000</option><option value="mid">$18,000 – $26,000</option><option value="high">Más de $26,000</option></select>
         </section>
-        <section>
-          <span>SEÑALES DE UBICACIÓN</span>
-          <label><input type="checkbox" defaultChecked/> Densidad residencial</label>
-          <label><input type="checkbox" defaultChecked/> Movilidad reciente</label>
-          <label><input type="checkbox"/> Expansión urbana</label>
-          <label><input type="checkbox"/> Actividad económica</label>
-        </section>
-        <div className="gr-data-note"><Database size={14}/><div><strong>Data coverage</strong><p>El activo es prototipo; el contexto territorial se vincula a información observada.</p></div></div>
+        <section><span>BÚSQUEDA GUARDADA</span>{savedSearch?<button className="gi-reonomy-primary" onClick={restoreSearch}><Bookmark size={14}/> Recuperar búsqueda</button>:<p className="gr-filter-notice">Guarda tus filtros para recuperarlos en este navegador.</p>}</section>
+        <div className="gr-data-note"><Database size={14}/><div><strong>CATÁLOGO DEMOSTRATIVO</strong><p>Activos, superficies y precios simulados. El contexto de cada AGEB proviene de datos observados.</p></div></div>
       </aside>}
 
       <section className="gr-results">
@@ -890,7 +734,7 @@ function Properties(){
           <div><span>PRECIO MEDIO</span><strong>{mxn(avgPrice)}<small>/m²</small></strong></div>
           <div><span>VALOR VISIBLE</span><strong>{mxn(totalValue)}</strong></div>
         </div>
-        <div className="gr-result-head"><span>ACTIVOS</span><button><Download size={13}/> Exportar</button></div>
+        <div className="gr-result-head"><span>ACTIVOS · DEMOSTRACIÓN</span><button onClick={()=>exportProperties(rows)} disabled={!rows.length}><Download size={13}/> Exportar CSV</button></div>
         {loading?<div className="gr-loading">{Array.from({length:6},(_,i)=><i key={i}/>)}</div>:
         <div className="gr-result-list">
           {rows.map(p=><button key={p.id} className={'gr-result '+(selected?.id===p.id?'active':'')} onClick={()=>setSelected(p)}>
@@ -898,55 +742,53 @@ function Properties(){
             <div className="gr-result-copy"><small>{p.id}</small><strong>{p.title}</strong><span>AGEB {p.location_id.slice(-4)} · Mazatlán</span><div><em>{fmt(p.area_m2)} m²</em><em>{mxn(p.price_m2)}/m²</em></div></div>
             <div className="gr-result-metric"><strong>{mxn(p.estimated_value)}</strong><span>Opportunity {p.opportunity_score}</span><i><em style={{width:p.opportunity_score+'%'}}/></i></div>
           </button>)}
-          {!rows.length&&<div className="gr-empty"><Search size={24}/><strong>No hay activos con estos filtros</strong><span>Ajusta el universo de búsqueda.</span></div>}
+          {!rows.length&&<div className="gr-empty"><Search size={24}/><strong>{error||'No hay activos con estos filtros'}</strong><span>Ajusta el universo de búsqueda.</span></div>}
         </div>}
       </section>
 
       <section className="gr-mapstage">
-        {view==='map'?<>
-          <PropertyMap rows={rows} selected={selected} onSelect={setSelected}/>
-          <div className="gr-map-legend"><strong>Opportunity score</strong><span><i className="hi"/> 80–100</span><span><i className="mid"/> 65–79</span><span><i/> &lt;65</span></div>
+        {view!=='table'?<>
+          <PropertyMap rows={rows} selected={selected} onSelect={setSelected} metric={mapMetric}/>
+          <div className="gr-map-legend"><strong>{mapMetric==='opportunity_score'?'Score territorial':mapMetric==='price_m2'?'Precio / m² · simulado':'Superficie · simulada'}</strong><span><i className="hi"/> {mapMetric==='opportunity_score'?'80–100':'Alto'}</span><span><i className="mid"/> {mapMetric==='opportunity_score'?'65–79':'Medio'}</span><span><i/> {mapMetric==='opportunity_score'?'<65':'Bajo'}</span></div>
           <div className="gr-map-count"><MapPin size={13}/>{rows.length} activos en vista</div>
           {layersOpen&&<div className="gr-layer-menu">
             <header><strong>Capas del mapa</strong><button onClick={()=>setLayersOpen(false)}><X size={14}/></button></header>
-            <label><input type="checkbox" defaultChecked/> Opportunity score</label>
-            <label><input type="checkbox"/> Densidad de población</label>
-            <label><input type="checkbox"/> Vivienda</label>
-            <label><input type="checkbox"/> DENUE / actividad</label>
-            <label><input type="checkbox"/> Distritos CODESIN</label>
-            <small>Las capas adicionales se activarán conforme se incorporen sus geometrías al API de mapas.</small>
+            {[['opportunity_score','Score territorial'],['price_m2','Precio / m² (simulado)'],['area_m2','Superficie (simulada)']].map(([key,label])=><label key={key}><input type="radio" name="map-layer" checked={mapMetric===key} onChange={()=>setMapMetric(key)}/>{label}</label>)}
+            <small>La geometría representa la AGEB de contexto; no es el límite catastral del inmueble.</small>
           </div>}
         </>:<div className="gr-table">
           <div className="gr-table-head"><span>Activo</span><span>Tipo</span><span>Área</span><span>$/m²</span><span>Valor</span><span>Score</span></div>
           {rows.map(p=><button key={p.id} onClick={()=>setSelected(p)}><span><b>{p.title}</b><small>{p.id}</small></span><span>{p.type}</span><span>{fmt(p.area_m2)} m²</span><span>{mxn(p.price_m2)}</span><span>{mxn(p.estimated_value)}</span><strong>{p.opportunity_score}</strong></button>)}
         </div>}
       </section>
-      {selected&&<PropertyDrawer property={selected} onClose={()=>setSelected(null)}/>}
+      {selected&&<PropertyDrawer key={selected.id} property={selected} onClose={()=>setSelected(null)}/>}
     </div>
+    {toast&&<div className="gr-toast" role="status">{toast}</div>}
   </main>
 }
 
 function App(){
   const [route,setRoute]=useState(routeFromHash)
   useEffect(()=>{
-    const handler=()=>setRoute(routeFromHash())
+    const handler=()=>{setRoute(routeFromHash());window.scrollTo(0,0)}
     addEventListener('hashchange',handler)
     if(!location.hash)location.hash='home'
     return()=>removeEventListener('hashchange',handler)
   },[])
   const status=apiStatus()
   const page=route.page
-  let content=<Home/>
-  if(page==='platform')content=<Platform/>
+  let content=<Landing/>
+  if(page==='platform')content=<DataPlatform/>
   else if(page==='locations')content=<Locations/>
-  else if(page==='location'&&route.id)content=<LocationProfile id={route.id}/>
-  else if(page==='district'&&route.id)content=<DistrictProfile slug={route.id}/>
+  else if(page==='location'&&route.id)content=<LocationProfile key={route.id} id={route.id}/>
+  else if(page==='district'&&route.id)content=<DistrictProfile key={route.id} slug={route.id}/>
   else if(page==='market')content=<Market/>
   else if(page==='properties')content=<Properties/>
   return <div className="gi-app">
-    <Header page={page}/>
+    <a className="gl-skip" href="#main-content" onClick={e=>{e.preventDefault();document.querySelector('main')?.focus()}}>Ir al contenido</a>
+    <SiteHeader page={page}/>
     {content}
-    <footer className="gi-footer"><div><span>G</span><strong>GROWA INMOBILIARIO</strong></div><p>Location intelligence para desarrollo, inversión y mercado.</p><em className={status.connected?'connected':''}>{status.connected?'API conectada':'modo local'}</em></footer>
+    <SiteFooter/>
   </div>
 }
 
