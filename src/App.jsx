@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import {
   apiStatus,getRankings,searchLocations,getLocation,compareLocations,
-  getMarketPulse,getMarketSummary,getDistricts,getDistrict,getProperties,searchAll
+  getMarketPulse,getMarketSummary,getDistricts,getDistrict,getProperties,searchAll,getOverview,getPropertyDetail
 } from './apiClient'
 import './app.css'
 
@@ -189,24 +189,15 @@ function Home(){
 }
 
 function Platform(){
-  const [ranking,setRanking]=useState([])
-  const [districts,setDistricts]=useState([])
-  const [market,setMarket]=useState(null)
+  const [overview,setOverview]=useState(null)
   useEffect(()=>{
     let active=true
-    Promise.all([
-      getRankings('opportunity',8).catch(()=>({rows:[]})),
-      getDistricts().catch(()=>({rows:[]})),
-      getMarketSummary().catch(()=>null)
-    ]).then(([r,d,m])=>{
-      if(!active)return
-      setRanking(r.rows||[])
-      setDistricts(d.rows||[])
-      setMarket(m)
-    })
+    getOverview().then(r=>active&&setOverview(r)).catch(()=>{})
     return()=>{active=false}
   },[])
-  const top=ranking[0]
+  const coverage=overview?.coverage||{}
+  const top=overview?.top_locations?.[0]
+  const market=overview?.market||{}
   const latest=market?.latest_month||{}
   return <main className="gi-platform-v2">
     <section className="gp-hero">
@@ -226,15 +217,21 @@ function Platform(){
           {Array.from({length:18},(_,i)=><i key={i} style={{left:(8+(i*37)%84)+'%',top:(12+(i*23)%74)+'%',width:(18+(i*7)%28)+'px',height:(14+(i*11)%25)+'px'}}/>)}
           <span className="hot a">78</span><span className="hot b">84</span><span className="hot c">71</span>
         </div>
-        <div className="gp-product-foot"><span><i/> Opportunity layer</span><b>{ranking.length?ranking.length+' zonas cargadas':'Cargando…'}</b></div>
+        <div className="gp-product-foot"><span><i/> Opportunity layer</span><b>{coverage.locations?fmt(coverage.locations)+' zonas':'Cargando…'}</b></div>
       </div>
     </section>
 
     <section className="gp-kpis">
-      <article><span>COBERTURA TERRITORIAL</span><strong>{ranking.length?ranking.length+'+':'—'}</strong><p>zonas listas para exploración</p></article>
-      <article><span>DISTRITOS</span><strong>{districts.length||'—'}</strong><p>agregados territoriales CODESIN</p></article>
+      <article><span>AGEB / ZONAS</span><strong>{coverage.locations?fmt(coverage.locations):'—'}</strong><p>ubicaciones con perfil territorial</p></article>
+      <article><span>DISTRITOS</span><strong>{coverage.districts||'—'}</strong><p>agregados CODESIN</p></article>
       <article><span>TOP OPPORTUNITY</span><strong>{top?.opportunity_score??'—'}</strong><p>{top?('AGEB '+top.id.slice(-4)):'score territorial'}</p></article>
       <article><span>FINANCIAMIENTOS · ÚLTIMO MES</span><strong>{fmt(latest.actions)}</strong><p>{market?.observed_through||'SNIIV / SEDATU'}</p></article>
+    </section>
+
+    <section className="gp-coverage-line">
+      <div><Users size={18}/><span>Población cubierta</span><strong>{fmt(coverage.population)}</strong></div>
+      <div><HomeIcon size={18}/><span>Hogares cubiertos</span><strong>{fmt(coverage.households)}</strong></div>
+      <div><Target size={18}/><span>Zonas con score 70+</span><strong>{fmt(coverage.high_opportunity_locations)}</strong></div>
     </section>
 
     <section className="gp-modules">
@@ -705,6 +702,9 @@ function PropertyMap({rows=[],selected,onSelect}){
 
 function PropertyDrawer({property,onClose}){
   const [saved,setSaved]=useState(()=>{try{return JSON.parse(localStorage.getItem('growa_saved_properties')||'[]').includes(property.id)}catch{return false}})
+  const [tab,setTab]=useState('summary')
+  const [detail,setDetail]=useState(null)
+  useEffect(()=>{let active=true;setDetail(null);getPropertyDetail(property.id).then(r=>active&&setDetail(r)).catch(()=>{});return()=>{active=false}},[property.id])
   const toggle=()=>{
     try{
       const current=JSON.parse(localStorage.getItem('growa_saved_properties')||'[]')
@@ -713,39 +713,89 @@ function PropertyDrawer({property,onClose}){
       setSaved(next.includes(property.id))
     }catch{}
   }
-  return <aside className="gi-reonomy-drawer">
+  const location=detail?.location||{}
+  const district=detail?.district
+  const market=detail?.market||{}
+  const latest=market?.latest_month||{}
+  const bench=detail?.benchmarks||{}
+  return <aside className="gi-reonomy-drawer gi-property-detail-v2">
     <div className="gi-reonomy-drawer-top">
-      <button onClick={onClose}><X size={15}/></button>
+      <button onClick={onClose}><X size={17}/></button>
       <div><span>{property.type}</span><small>{property.id}</small></div>
-      <button className={saved?'saved':''} onClick={toggle}><Bookmark size={14}/></button>
+      <button className={saved?'saved':''} onClick={toggle}><Bookmark size={16}/></button>
     </div>
-    <div className="gi-reonomy-photo"><MapIcon size={30}/><span>PROPERTY INTELLIGENCE</span></div>
+    <div className="gi-reonomy-photo"><MapIcon size={34}/><span>PROPERTY INTELLIGENCE</span><b>{property.opportunity_score}</b></div>
     <div className="gi-reonomy-title">
       <span>AGEB {property.location_id.slice(-4)} · Mazatlán</span>
       <h2>{property.title}</h2>
       <strong>{mxn(property.estimated_value)}</strong>
       <small>{mxn(property.price_m2)} / m² · referencia simulada</small>
     </div>
-    <div className="gi-reonomy-tabs"><button className="active">Resumen</button><button>Ubicación</button><button>Mercado</button><button>Notas</button></div>
-    <section className="gi-reonomy-section">
-      <header><span>BUILDING & LOT</span><b>{property.opportunity_score}/100</b></header>
-      <div className="gi-reonomy-specs">
-        <div><span>Tipo de activo</span><strong>{property.type}</strong></div>
-        <div><span>Superficie</span><strong>{fmt(property.area_m2)} m²</strong></div>
-        <div><span>Precio / m²</span><strong>{mxn(property.price_m2)}</strong></div>
-        <div><span>Valor de referencia</span><strong>{mxn(property.estimated_value)}</strong></div>
-      </div>
-    </section>
-    <section className="gi-reonomy-section">
-      <header><span>LOCATION INTELLIGENCE</span></header>
-      <div className="gi-location-score-row"><span>Oportunidad territorial</span><i><em style={{width:property.opportunity_score+'%'}}/></i><b>{property.opportunity_score}</b></div>
-      <p className="gi-reonomy-copy">El score se vincula con la AGEB observada. Superficie y valor del activo siguen siendo simulados hasta integrar información predial real.</p>
-      <button className="gi-reonomy-primary" onClick={()=>go('location',property.location_id)}>Abrir perfil de ubicación <ArrowRight size={12}/></button>
-    </section>
-    <section className="gi-reonomy-section">
-      <header><span>DATA COVERAGE</span></header>
-      <div className="gi-property-roadmap"><p><Check size={12}/> Demografía y territorio</p><p><Check size={12}/> Financiamiento municipal</p><p><Check size={12}/> Score de ubicación</p><p><Plus size={12}/> Predio / propietario real</p><p><Plus size={12}/> Transacciones y comparables</p></div>
-    </section>
+    <div className="gi-reonomy-tabs">
+      <button className={tab==='summary'?'active':''} onClick={()=>setTab('summary')}>Resumen</button>
+      <button className={tab==='location'?'active':''} onClick={()=>setTab('location')}>Ubicación</button>
+      <button className={tab==='market'?'active':''} onClick={()=>setTab('market')}>Mercado</button>
+      <button className={tab==='data'?'active':''} onClick={()=>setTab('data')}>Datos</button>
+    </div>
+
+    {tab==='summary'&&<>
+      <section className="gi-reonomy-section">
+        <header><span>BUILDING & LOT</span><b>{property.opportunity_score}/100</b></header>
+        <div className="gi-reonomy-specs">
+          <div><span>Tipo de activo</span><strong>{property.type}</strong></div>
+          <div><span>Superficie</span><strong>{fmt(property.area_m2)} m²</strong></div>
+          <div><span>Precio / m²</span><strong>{mxn(property.price_m2)}</strong></div>
+          <div><span>Valor de referencia</span><strong>{mxn(property.estimated_value)}</strong></div>
+        </div>
+      </section>
+      <section className="gi-reonomy-section">
+        <header><span>MARKET POSITION</span><small>percentil dentro del universo demo</small></header>
+        <div className="gr-percentiles">
+          <div><span>Opportunity</span><i><em style={{width:(bench.score_percentile||0)+'%'}}/></i><b>{bench.score_percentile??'—'}º</b></div>
+          <div><span>Precio / m²</span><i><em style={{width:(bench.price_m2_percentile||0)+'%'}}/></i><b>{bench.price_m2_percentile??'—'}º</b></div>
+          <div><span>Superficie</span><i><em style={{width:(bench.area_percentile||0)+'%'}}/></i><b>{bench.area_percentile??'—'}º</b></div>
+          <div><span>Valor</span><i><em style={{width:(bench.value_percentile||0)+'%'}}/></i><b>{bench.value_percentile??'—'}º</b></div>
+        </div>
+      </section>
+    </>}
+
+    {tab==='location'&&<>
+      <section className="gi-reonomy-section">
+        <header><span>LOCATION PROFILE</span><b>{location.opportunity_score??property.opportunity_score}/100</b></header>
+        {!detail?<div className="gr-drawer-loading">Cargando perfil territorial…</div>:<div className="gr-location-kpis">
+          <div><span>Población</span><strong>{fmt(location.population)}</strong></div>
+          <div><span>Hogares</span><strong>{fmt(location.households)}</strong></div>
+          <div><span>Movilidad reciente</span><strong>{pct(location.recent_mobility_share)}</strong></div>
+          <div><span>Adultos</span><strong>{pct(location.adult_share)}</strong></div>
+        </div>}
+      </section>
+      <section className="gi-reonomy-section">
+        <header><span>DISTRITO</span></header>
+        <div className="gr-district-box"><MapPin size={16}/><div><strong>{district?.name||'Sin asignación disponible'}</strong><span>{district?('Opportunity '+district.opportunity_score+'/100'):'Perfil a escala AGEB'}</span></div></div>
+        <button className="gi-reonomy-primary" onClick={()=>go('location',property.location_id)}>Abrir perfil completo <ArrowRight size={13}/></button>
+      </section>
+    </>}
+
+    {tab==='market'&&<>
+      <section className="gi-reonomy-section">
+        <header><span>MARKET CONTEXT</span><small>{market?.observed_through}</small></header>
+        <div className="gr-market-mini">
+          <div><span>Financiamientos · último mes</span><strong>{fmt(latest.actions)}</strong></div>
+          <div><span>Monto · último mes</span><strong>{mxn(latest.amount_mxn)}</strong></div>
+          <div><span>Acciones H1 a/a</span><strong>{market?.h1_comparison?((Number(market.h1_comparison.actions_pct)>=0?'+':'')+pct(market.h1_comparison.actions_pct)):'—'}</strong></div>
+        </div>
+        <p className="gi-reonomy-copy">El contexto de mercado es municipal y se presenta por separado del perfil intraurbano del activo.</p>
+        <button className="gi-reonomy-primary" onClick={()=>go('market')}>Abrir Market Intelligence <ArrowRight size={13}/></button>
+      </section>
+    </>}
+
+    {tab==='data'&&<>
+      <section className="gi-reonomy-section">
+        <header><span>DATA COVERAGE</span></header>
+        <div className="gi-property-roadmap"><p><Check size={13}/> Demografía INEGI por AGEB</p><p><Check size={13}/> Distrito CODESIN</p><p><Check size={13}/> Financiamiento municipal SNIIV</p><p><Check size={13}/> Score territorial derivado</p><p><Plus size={13}/> Predio catastral real</p><p><Plus size={13}/> Propietario y contacto</p><p><Plus size={13}/> Transacciones y comparables</p></div>
+      </section>
+      <section className="gi-reonomy-section"><header><span>NOTA DE MODELO</span></header><p className="gi-reonomy-copy">Superficie, precio y valor del activo son simulados para probar el producto. Las variables de contexto territorial y de mercado están separadas por fuente y escala.</p></section>
+    </>}
   </aside>
 }
 
