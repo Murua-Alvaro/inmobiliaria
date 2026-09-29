@@ -402,6 +402,29 @@ const server=http.createServer(async(req,res)=>{
       const locations=district.ageb_ids.map(id=>state.records.find(r=>r.id===id)).filter(Boolean).map(pick)
       return json(req,res,200,{district,locations,source:'CODESIN + INEGI Censo 2020'})
     }
+    if(url.pathname==='/api/overview'){
+      const totalPopulation=state.records.reduce((a,r)=>a+(Number(r.population)||0),0)
+      const totalHouseholds=state.records.reduce((a,r)=>a+(Number(r.households)||0),0)
+      const highOpportunity=state.records.filter(r=>(Number(r.opportunity_score)||0)>=70).length
+      const topLocations=[...state.records].sort((a,b)=>(b.opportunity_score||0)-(a.opportunity_score||0)).slice(0,8).map(pick)
+      const topDistricts=[...state.districts].sort((a,b)=>(b.opportunity_score||0)-(a.opportunity_score||0)).slice(0,6)
+      return json(req,res,200,{
+        geography:'Mazatlán, Sinaloa',
+        coverage:{locations:state.records.length,districts:state.districts.length,population:totalPopulation,households:totalHouseholds,high_opportunity_locations:highOpportunity},
+        market:marketSummary(),
+        top_locations:topLocations,
+        top_districts:topDistricts,
+        layers:[
+          {key:'demography',label:'Demografía',status:'observed'},
+          {key:'housing',label:'Vivienda',status:'observed'},
+          {key:'districts',label:'Distritos CODESIN',status:'observed'},
+          {key:'finance',label:'Financiamiento',status:'observed'},
+          {key:'opportunity',label:'Opportunity Score',status:'derived'},
+          {key:'properties',label:'Property layer',status:'synthetic'}
+        ],
+        loaded_at:state.loadedAt,source:state.source
+      })
+    }
     if(url.pathname==='/api/property-facets'){
       const universe=syntheticProperties(state.records,100)
       const byType={}
@@ -474,11 +497,30 @@ const server=http.createServer(async(req,res)=>{
       if(!property)return json(req,res,404,{error:'Activo no encontrado'},'no-store')
       const location=state.records.find(r=>r.id===property.location_id)
       const district=state.districts.find(d=>d.ageb_ids.includes(property.location_id))||null
+      const universe=syntheticProperties(state.records,100)
+      const percentileRank=(value,key)=>{
+        const vals=universe.map(x=>Number(x[key])).filter(Number.isFinite).sort((a,b)=>a-b)
+        if(!vals.length||!Number.isFinite(Number(value)))return null
+        const below=vals.filter(v=>v<=Number(value)).length
+        return Math.round(below/vals.length*100)
+      }
       return json(req,res,200,{
         property,
         location:pick(location),
         district:district?{name:district.name,slug:district.slug,opportunity_score:district.opportunity_score}:null,
         market:marketSummary(),
+        benchmarks:{
+          score_percentile:percentileRank(property.opportunity_score,'opportunity_score'),
+          price_m2_percentile:percentileRank(property.price_m2,'price_m2'),
+          area_percentile:percentileRank(property.area_m2,'area_m2'),
+          value_percentile:percentileRank(property.estimated_value,'estimated_value')
+        },
+        signals:[
+          {key:'location_score',label:'Oportunidad territorial',value:property.opportunity_score,unit:'/100',status:'derived'},
+          {key:'population',label:'Población AGEB',value:location?.population||null,status:'observed'},
+          {key:'households',label:'Hogares AGEB',value:location?.households||null,status:'observed'},
+          {key:'mobility',label:'Movilidad reciente',value:location?.recent_mobility_share||null,unit:'%',status:'observed'}
+        ],
         synthetic:true,
         source:'derived-demo + growa-territorial'
       })
