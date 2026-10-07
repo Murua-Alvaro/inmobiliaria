@@ -63,6 +63,13 @@ function go(page,id){
   location.hash=(page==='location'||page==='district')&&id?page+'/'+encodeURIComponent(id):page
 }
 
+function PropertyIntelligenceRedirect(){
+  useEffect(()=>{
+    window.location.replace('https://growa-territorial.onrender.com/#/inmobiliario')
+  },[])
+  return <main tabIndex={-1} className="gi-page-loading"><i/> Abriendo inteligencia inmobiliaria…</main>
+}
+
 function SearchBox({large=false,onSelect}){
   const [q,setQ]=useState('')
   const [rows,setRows]=useState([])
@@ -781,6 +788,7 @@ function App(){
   const page=route.page
   let content=<Landing/>
   if(page==='platform')content=<DataPlatform/>
+  else if(page==='property-intelligence')content=<PropertyIntelligenceRedirect/>
   else if(page==='locations')content=<Locations/>
   else if(page==='location'&&route.id)content=<LocationProfile key={route.id} id={route.id}/>
   else if(page==='district'&&route.id)content=<DistrictProfile key={route.id} slug={route.id}/>
