@@ -308,27 +308,6 @@ function parseLimit(value,def=10,max=100){
   return Number.isFinite(n)?Math.max(1,Math.min(max,Math.trunc(n))):def
 }
 
-function syntheticProperties(records,limit=24){
-  const types=['Terreno','Uso mixto','Comercial','Residencial']
-  return [...records].sort((a,b)=>b.opportunity_score-a.opportunity_score).slice(0,limit).map((r,i)=>{
-    const factor=.82+((i*37)%17)/100
-    const area=Math.round(500+(r.population%4200)*factor)
-    const priceM2=Math.round(7500+(r.opportunity_score*170)+((i*997)%8000))
-    return {
-      id:'DEMO-'+r.id.slice(-6)+'-'+(i+1),
-      location_id:r.id,
-      type:types[i%types.length],
-      title:'Oportunidad '+types[i%types.length].toLowerCase()+' · AGEB '+r.id.slice(-4),
-      area_m2:area,
-      price_m2:priceM2,
-      estimated_value:area*priceM2,
-      opportunity_score:r.opportunity_score,
-      synthetic:true,
-      disclaimer:'Activo simulado para diseño y pruebas; no representa una propiedad u oferta real.',
-    }
-  })
-}
-
 const server=http.createServer(async(req,res)=>{
   try{
     if(req.method==='OPTIONS'){cors(req,res);res.statusCode=204;return res.end()}
