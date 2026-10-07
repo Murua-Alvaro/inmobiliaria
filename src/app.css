@@ -295,3 +295,11 @@ body{font-size:14px}.gi-app{background:#fff;color:var(--g-ink)}
 .gr-offer-head-meta strong{display:block;font-family:Manrope,sans-serif;font-size:24px;color:#0b7f82;line-height:1}
 .gr-offer-head-meta span{display:block;margin-top:5px;letter-spacing:0;font-size:7px;color:#82979a}
 @media(max-width:720px){.gr-offer-head{align-items:flex-start;padding:20px 18px 16px}.gr-offer-head h1{font-size:24px}.gr-offer-head-meta{display:none}}
+
+@media(max-width:760px){
+  .gi-reonomy-v2 .gr-offer-head{height:72px;box-sizing:border-box;padding:12px 14px;align-items:center}
+  .gi-reonomy-v2 .gr-offer-head h1{font-size:20px;margin:2px 0}
+  .gi-reonomy-v2 .gr-offer-head p{font-size:7px;line-height:1.35;max-width:92%}
+  .gi-reonomy-v2 .gr-offer-head>div:first-child>span{font-size:6px}
+  .gi-reonomy-v2 .gr-shell,.gi-reonomy-v2 .gr-shell.has-drawer,.gi-reonomy-v2 .gr-shell.filters-collapsed,.gi-reonomy-v2 .gr-shell.filters-collapsed.has-drawer{height:calc(100% - 183px)}
+}
