@@ -285,3 +285,13 @@ body{font-size:14px}.gi-app{background:#fff;color:var(--g-ink)}
 .gr-map-legend.real-offer i.rent{background:#b98235!important}
 .gr-map-precision-note{position:absolute;left:14px;bottom:14px;max-width:360px;background:rgba(255,255,255,.94);border:1px solid #dce8e8;border-radius:4px;padding:8px 10px;font-size:6px;line-height:1.45;color:#6f878a;z-index:480;box-shadow:0 4px 14px rgba(20,60,64,.08)}
 @media(max-width:720px){.gr-map-precision-note{left:10px;right:10px;max-width:none;font-size:7px}}
+
+.gr-offer-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:24px 28px 20px;border-bottom:1px solid #e6eeee;background:#fff}
+.gr-offer-head>div:first-child{min-width:0}
+.gr-offer-head span{font-size:7px;letter-spacing:.11em;color:#78979a}
+.gr-offer-head h1{margin:5px 0 6px;font-family:Manrope,sans-serif;font-size:28px;line-height:1.05;letter-spacing:-.035em;color:#173f44;font-weight:600}
+.gr-offer-head p{margin:0;max-width:720px;font-size:8px;line-height:1.55;color:#789094}
+.gr-offer-head-meta{min-width:100px;text-align:right}
+.gr-offer-head-meta strong{display:block;font-family:Manrope,sans-serif;font-size:24px;color:#0b7f82;line-height:1}
+.gr-offer-head-meta span{display:block;margin-top:5px;letter-spacing:0;font-size:7px;color:#82979a}
+@media(max-width:720px){.gr-offer-head{align-items:flex-start;padding:20px 18px 16px}.gr-offer-head h1{font-size:24px}.gr-offer-head-meta{display:none}}
