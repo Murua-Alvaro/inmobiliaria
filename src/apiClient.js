@@ -156,60 +156,53 @@ export async function getMarketPulse(){
   }
 }
 
-export async function getProperties(limit=24,filters={}){
+let localListingsPromise=null
+async function localListings(){
+  if(localListingsPromise)return localListingsPromise
+  localListingsPromise=Promise.all([
+    fetch('/data/listings-centro.json').then(r=>r.json()),
+    fetch('/data/listings-marina.json').then(r=>r.json()),
+    fetch('/data/listings-sabalo.json').then(r=>r.json()),
+  ]).then(packs=>packs.flatMap(x=>x.records||[]).map(p=>({...p,synthetic:false,title:p.title||((p.type||'Propiedad')+' en '+(p.zone||'Mazatlán'))})))
+  return localListingsPromise
+}
+
+export async function getProperties(limit=100,filters={}){
   const params=new URLSearchParams({limit:String(limit)})
   if(filters.type&&filters.type!=='Todos')params.set('type',filters.type)
-  if(filters.minScore)params.set('min_score',String(filters.minScore))
+  if(filters.operation&&filters.operation!=='Todos')params.set('operation',filters.operation)
+  if(filters.zone&&filters.zone!=='Todas')params.set('zone',filters.zone)
   if(filters.minArea)params.set('min_area',String(filters.minArea))
   if(filters.maxArea)params.set('max_area',String(filters.maxArea))
   if(filters.minPriceM2)params.set('min_price_m2',String(filters.minPriceM2))
   if(filters.maxPriceM2)params.set('max_price_m2',String(filters.maxPriceM2))
-  if(filters.minValue)params.set('min_value',String(filters.minValue))
-  if(filters.maxValue)params.set('max_value',String(filters.maxValue))
   if(filters.q)params.set('q',String(filters.q))
   if(filters.sort)params.set('sort',String(filters.sort))
   try{return await remote('/api/properties?'+params.toString(),{noCache:true})}
   catch{
-    const records=(await localRecords()).sort((a,b)=>b.opportunity_score-a.opportunity_score).slice(0,100)
-    const types=['Terreno','Uso mixto','Comercial','Residencial']
-    let rows=records.map((r,i)=>{
-      const factor=.82+((i*37)%17)/100
-      const area=Math.round(500+(r.population%4200)*factor)
-      const priceM2=Math.round(7500+(r.opportunity_score*170)+((i*997)%8000))
-      return {
-        id:'DEMO-'+r.id.slice(-6)+'-'+(i+1),
-        location_id:r.id,
-        type:types[i%types.length],
-        title:'Oportunidad '+types[i%types.length].toLowerCase()+' · AGEB '+r.id.slice(-4),
-        area_m2:area,
-        price_m2:priceM2,
-        estimated_value:area*priceM2,
-        opportunity_score:r.opportunity_score,
-        synthetic:true,
-      }
-    })
+    const all=await localListings()
     const q=String(filters.q||'').trim().toLowerCase()
-    rows=rows.filter(p=>
-      (!filters.type||filters.type==='Todos'||p.type===filters.type) &&
-      (!filters.minScore||p.opportunity_score>=filters.minScore) &&
-      (!filters.minArea||p.area_m2>=filters.minArea) &&
-      (!filters.maxArea||p.area_m2<=filters.maxArea) &&
-      (!filters.minPriceM2||p.price_m2>=filters.minPriceM2) &&
-      (!filters.maxPriceM2||p.price_m2<=filters.maxPriceM2) &&
-      (!filters.minValue||p.estimated_value>=filters.minValue) &&
-      (!filters.maxValue||p.estimated_value<=filters.maxValue) &&
-      (!q||p.id.toLowerCase().includes(q)||p.title.toLowerCase().includes(q)||p.type.toLowerCase().includes(q)||('ageb '+p.location_id.slice(-4)).includes(q))
+    let rows=all.filter(p=>
+      (!filters.type||filters.type==='Todos'||p.type===filters.type)&&
+      (!filters.operation||filters.operation==='Todos'||p.operation===filters.operation)&&
+      (!filters.zone||filters.zone==='Todas'||p.zone===filters.zone)&&
+      (!filters.minArea||Number(p.area_m2)>=filters.minArea)&&
+      (!filters.maxArea||Number(p.area_m2)<=filters.maxArea)&&
+      (!filters.minPriceM2||Number(p.price_m2)>=filters.minPriceM2)&&
+      (!filters.maxPriceM2||Number(p.price_m2)<=filters.maxPriceM2)&&
+      (!q||[p.id,p.type,p.operation,p.zone,p.address,p.source,p.franchise].some(v=>String(v||'').toLowerCase().includes(q)))
     )
-    const sort=filters.sort||'score_desc'
-    rows.sort((a,b)=>sort==='value_desc'?b.estimated_value-a.estimated_value:
-      sort==='price_asc'?a.price_m2-b.price_m2:
-      sort==='area_desc'?b.area_m2-a.area_m2:
-      b.opportunity_score-a.opportunity_score)
+    const sort=filters.sort||'date_desc'
+    rows.sort((a,b)=>sort==='price_desc'?(Number(b.price)||0)-(Number(a.price)||0):
+      sort==='price_asc'?(Number(a.price)||0)-(Number(b.price)||0):
+      sort==='price_m2_asc'?(Number(a.price_m2)||Infinity)-(Number(b.price_m2)||Infinity):
+      sort==='area_desc'?(Number(b.area_m2)||0)-(Number(a.area_m2)||0):
+      String(b.observed_at||'').localeCompare(String(a.observed_at||'')))
+    const total=rows.length
     rows=rows.slice(0,limit)
-    return {rows,total:rows.length,source:'local-fallback',synthetic:true}
+    return {rows,total,source:'local-listings',synthetic:false}
   }
 }
-
 
 export async function getOverview(){
   try{return await remote('/api/overview')}
@@ -240,12 +233,10 @@ export async function getOverview(){
 export async function getPropertyDetail(id){
   try{return await remote('/api/properties/'+encodeURIComponent(id),{noCache:true})}
   catch{
-    const all=await getProperties(100)
-    const property=(all.rows||[]).find(p=>p.id===id)
-    if(!property)throw new Error('Activo no encontrado')
-    const location=await getLocation(property.location_id).then(r=>r.location).catch(()=>null)
+    const property=(await localListings()).find(p=>String(p.id)===String(id))
+    if(!property)throw new Error('Oferta no encontrada')
     const market=await getMarketSummary().catch(()=>null)
-    return {property,location,district:null,market,benchmarks:null,signals:[],synthetic:true,source:'local-fallback'}
+    return {property,location:null,district:null,market,benchmarks:null,signals:[],synthetic:false,source:'local-listings'}
   }
 }
 
