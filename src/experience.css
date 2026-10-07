@@ -90,3 +90,34 @@ html{scroll-behavior:smooth;scroll-padding-top:100px}body{font-size:15px;line-he
   .gi-reonomy-v2 .gr-result{grid-template-columns:minmax(0,1fr)!important}
   .gi-reonomy-v2 .gr-result-metric{grid-column:1!important;align-items:flex-start!important;text-align:left!important;margin-top:6px}
 }
+
+/* Audited real-estate offer information */
+.gr-source-strip{min-height:32px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:5px 12px;border-bottom:1px solid #e7eded;background:#fff}
+.gr-source-strip span{display:inline-flex;align-items:center;gap:5px;padding:4px 7px;border:1px solid #dfe9e9;border-radius:12px;font-size:9.5px;color:#6e898d;background:#fbfdfd}
+.gr-source-strip b{font-size:9.5px;color:#24585c}
+.gr-observed-date{display:block!important;margin-top:8px!important;color:#7c9699!important;font-family:Inter,Arial,sans-serif!important;font-size:9.5px!important}
+.gr-amenity-chips{display:flex;flex-wrap:wrap;gap:6px}
+.gr-amenity-chips span{padding:6px 8px;border:1px solid #dce8e8;border-radius:14px;background:#f6fafa;color:#53777b;font-size:10px;line-height:1}
+.gr-publication-list{display:grid;gap:0;border:1px solid #e3ebeb;border-radius:5px;overflow:hidden;background:#fff}
+.gr-publication-list>div{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:9px 10px;border-bottom:1px solid #edf1f1}
+.gr-publication-list>div:last-child{border-bottom:0}
+.gr-publication-list span{font-size:10px;color:#81979a}
+.gr-publication-list strong{max-width:62%;text-align:right;font-size:10px;color:#2c555a;font-weight:600;overflow-wrap:anywhere}
+.gr-address-note{display:flex;align-items:flex-start;gap:7px;margin:11px 0 0;padding:9px 10px;border-radius:4px;background:#fff8e8;color:#725b27;font-size:9.5px;line-height:1.45}
+.gr-address-note svg{flex:0 0 auto;margin-top:1px}
+.gr-offer-popup-wrap .leaflet-popup-content-wrapper{border-radius:6px;box-shadow:0 10px 28px rgba(18,55,59,.18);padding:0}
+.gr-offer-popup-wrap .leaflet-popup-content{margin:0}
+.gr-offer-popup{min-width:220px;max-width:300px;padding:12px 13px;display:flex;flex-direction:column;gap:4px}
+.gr-offer-popup small{font-size:9px;letter-spacing:.05em;color:#789397;text-transform:uppercase}
+.gr-offer-popup strong{font:600 17px Manrope,sans-serif;color:#183f44;margin:2px 0}
+.gr-offer-popup b{font-size:11px;line-height:1.35;color:#315b60}
+.gr-offer-popup span{font-size:9.5px;line-height:1.35;color:#708b8f}
+.gr-offer-popup em{font-size:8.5px;font-style:normal;color:#0b7f82;margin-top:2px}
+.gi-map-tip span+span{margin-top:2px}
+.gi-reonomy-v2 .gr-result-copy>div{flex-wrap:wrap;row-gap:5px}
+.gi-reonomy-v2 .gr-result-copy em{white-space:nowrap}
+.gi-reonomy-v2 .gr-result-head>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:1450px) and (min-width:761px){
+  .gi-reonomy-v2 .gr-source-strip{padding:5px 10px}
+  .gi-reonomy-v2 .gr-source-strip span{font-size:9px}
+}
