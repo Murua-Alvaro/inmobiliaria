@@ -575,6 +575,33 @@ function fallbackPoint(property,colonias){
   if(Number.isFinite(lat)&&Number.isFinite(lng))return {lat,lng,precision:'zona_segura',label:property.zone||'Mazatlán'}
   return null
 }
+function stableHash(value=''){
+  let h=2166136261
+  for(const ch of String(value)){
+    h^=ch.charCodeAt(0)
+    h=Math.imul(h,16777619)
+  }
+  return h>>>0
+}
+function displayPointInsideArea(property,resolved,index=0){
+  let lat=Number(resolved?.lat),lng=Number(resolved?.lng)
+  if(!Number.isFinite(lat)||!Number.isFinite(lng))return null
+  if(resolved.precision==='direccion'||resolved.precision==='direccion_cache')return [lat,lng]
+
+  const feature=resolved.colony_feature
+  const seed=stableHash(property.id||property.listing_id||property.address||index)
+  const baseAngle=(seed%360)*Math.PI/180
+  const step=.00042
+  const maxTries=20
+  for(let k=0;k<maxTries;k++){
+    const radius=step*(1+Math.floor(k/4)+((seed>>5)%4)*.18)
+    const angle=baseAngle+k*2.399963
+    const candLat=lat+Math.sin(angle)*radius
+    const candLng=lng+Math.cos(angle)*radius
+    if(!feature||pointInGeometry(candLng,candLat,feature.geometry))return [candLat,candLng]
+  }
+  return [lat,lng]
+}
 function readGeocodeCache(){try{return JSON.parse(localStorage.getItem(PROPERTY_GEOCODE_CACHE)||'{}')}catch{return {}}}
 function writeGeocodeCache(cache){try{localStorage.setItem(PROPERTY_GEOCODE_CACHE,JSON.stringify(cache))}catch{}}
 async function geocodePublishedAddress(property,colonias){
@@ -615,9 +642,9 @@ function PropertyMap({rows=[],selected,onSelect}){
       zoomAnimation:false,fadeAnimation:false,markerZoomAnimation:false,
       zoomControl:false,attributionControl:true,minZoom:9,maxZoom:18
     })
-    L.tileLayer(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
-      {maxZoom:19,attribution:'Tiles © Esri · colonias SEPOMEX'}
+    const baseTiles=L.tileLayer(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {maxZoom:19,subdomains:'abc',attribution:'© OpenStreetMap contributors · colonias SEPOMEX'}
     ).addTo(map)
     L.control.zoom({position:'bottomright'}).addTo(map)
     map.setView([23.245,-106.445],12)
@@ -678,20 +705,11 @@ function PropertyMap({rows=[],selected,onSelect}){
       const resolved=geoPoints[String(p.id)]||fallbackPoint(p,colonias)
       if(!resolved)return
 
-      let lat=Number(resolved.lat),lng=Number(resolved.lng)
-      if(!Number.isFinite(lat)||!Number.isFinite(lng))return
-
-      const coordKey=lat.toFixed(5)+'|'+lng.toFixed(5)
+      const coordKey=Number(resolved.lat).toFixed(5)+'|'+Number(resolved.lng).toFixed(5)
       const idx=occupied.get(coordKey)||0
       occupied.set(coordKey,idx+1)
-      if(idx>0&&resolved.precision!=='direccion'&&resolved.precision!=='direccion_cache'){
-        const angle=idx*2.399963
-        const ring=.00018*Math.sqrt(idx)
-        lat+=Math.sin(angle)*ring
-        lng+=Math.cos(angle)*ring
-      }
-
-      const pt=[lat,lng]
+      const pt=displayPointInsideArea(p,resolved,idx)
+      if(!pt)return
       points.push(pt)
       const active=selected&&String(selected.id)===String(p.id)
       const marker=L.circleMarker(pt,{
