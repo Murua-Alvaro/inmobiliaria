@@ -487,14 +487,23 @@ function Market(){
   </main>
 }
 
-function PropertyMap({rows=[],selected,onSelect,metric='opportunity_score'}){
+function displayPoint(property,index,groupSize){
+  const lat=Number(property.lat),lng=Number(property.lng)
+  if(!Number.isFinite(lat)||!Number.isFinite(lng))return null
+  if(groupSize<=1||property.location_precision!=='zone_anchor')return [lat,lng]
+  const angle=(index/groupSize)*Math.PI*2
+  const ring=0.00115+0.00042*(index%3)
+  return [lat+Math.sin(angle)*ring,lng+Math.cos(angle)*ring]
+}
+
+function PropertyMap({rows=[],selected,onSelect}){
   const node=useRef(null),mapRef=useRef(null),layerRef=useRef(null)
   useEffect(()=>{
     if(!node.current||mapRef.current)return
     const map=L.map(node.current,{zoomAnimation:false,fadeAnimation:false,markerZoomAnimation:false,zoomControl:false,attributionControl:true,minZoom:9,maxZoom:18})
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'}).addTo(map)
     L.control.zoom({position:'bottomright'}).addTo(map)
-    map.setView([23.245,-106.425],11)
+    map.setView([23.245,-106.445],12)
     mapRef.current=map
     const resize=new ResizeObserver(()=>map.invalidateSize());resize.observe(node.current)
     return()=>{resize.disconnect();map.remove();mapRef.current=null}
@@ -502,48 +511,53 @@ function PropertyMap({rows=[],selected,onSelect,metric='opportunity_score'}){
   useEffect(()=>{
     const map=mapRef.current
     if(!map)return
-    let cancelled=false
-    fetch('/data/ageb-geometry-2020.geojson').then(r=>r.json()).then(geo=>{
-      if(cancelled)return
-      if(layerRef.current)layerRef.current.remove()
-      const byId=new Map()
-      rows.forEach(p=>{
-        const id=String(p.location_id||'')
-        if(!byId.has(id))byId.set(id,[])
-        byId.get(id).push(p)
+    if(layerRef.current)layerRef.current.remove()
+    const layer=L.layerGroup().addTo(map)
+    const groups=new Map()
+    rows.forEach(p=>{
+      const key=(p.zone||'')+'|'+p.lat+'|'+p.lng
+      if(!groups.has(key))groups.set(key,[])
+      groups.get(key).push(p)
+    })
+    const points=[]
+    groups.forEach(group=>{
+      group.forEach((p,i)=>{
+        const pt=displayPoint(p,i,group.length)
+        if(!pt)return
+        points.push(pt)
+        const active=selected&&String(selected.id)===String(p.id)
+        const marker=L.circleMarker(pt,{
+          radius:active?8:6,
+          color:active?'#083f47':'#ffffff',
+          weight:active?3:2,
+          fillColor:p.operation==='Renta'?'#b98235':'#0b8588',
+          fillOpacity:.94
+        }).addTo(layer)
+        const price=p.currency==='USD'
+          ?'$'+fmt(p.price)+' USD'
+          :mxn(p.price)
+        marker.bindTooltip('<div class="gi-map-tip"><small>'+String(p.operation||'Oferta')+' · '+String(p.zone||'Mazatlán')+'</small><strong>'+price+'</strong><span>'+String(p.address||p.type||'Propiedad')+'</span></div>',{direction:'top',offset:[0,-5]})
+        marker.on('click',()=>onSelect?.(p))
       })
-      const features=(geo.features||[]).filter(ft=>byId.has(String(ft.properties?.cvegeo_ageb||ft.properties?.CVEGEO||'').slice(0,13)))
-      const layer=L.geoJSON({type:'FeatureCollection',features},{
-        style:ft=>{
-          const id=String(ft.properties?.cvegeo_ageb||ft.properties?.CVEGEO||'').slice(0,13)
-          const group=byId.get(id)||[]
-          const raw=Math.max(...group.map(x=>Number(x[metric])||0),0)
-          const maxScore=metric==='price_m2'?Math.min(100,raw/35000*100):metric==='area_m2'?Math.min(100,raw/5000*100):raw
-          const active=selected&&String(selected.location_id)===id
-          return {color:active?'#083f47':'#fff',weight:active?2:1,fillColor:maxScore>=80?'#0b777d':maxScore>=65?'#5ca7a7':'#b8d7d5',fillOpacity:active ? .92 : .78}
-        },
-        onEachFeature:(ft,l)=>{
-          const id=String(ft.properties?.cvegeo_ageb||ft.properties?.CVEGEO||'').slice(0,13)
-          const group=byId.get(id)||[]
-          const best=[...group].sort((a,b)=>b.opportunity_score-a.opportunity_score)[0]
-          if(!best)return
-          l.bindTooltip('<div class="gi-map-tip"><small>AGEB '+id.slice(-4)+'</small><strong>'+group.length+' activo'+(group.length===1?'':'s')+'</strong><span>Score '+best.opportunity_score+'/100</span></div>',{sticky:true,direction:'top'})
-          l.on('click',()=>onSelect?.(best))
-        }
-      }).addTo(map)
-      layerRef.current=layer
-      if(!selected&&layer.getBounds().isValid())map.fitBounds(layer.getBounds(),{padding:[24,24]})
-    }).catch(()=>{})
-    return()=>{cancelled=true}
-  },[rows,selected,onSelect,metric])
+    })
+    layerRef.current=layer
+    if(points.length&&!selected){
+      const bounds=L.latLngBounds(points)
+      if(bounds.isValid())map.fitBounds(bounds.pad(.18),{maxZoom:14,padding:[24,24]})
+    }
+    if(selected){
+      const group=groups.get((selected.zone||'')+'|'+selected.lat+'|'+selected.lng)||[selected]
+      const idx=Math.max(0,group.findIndex(x=>String(x.id)===String(selected.id)))
+      const pt=displayPoint(selected,idx,group.length)
+      if(pt)map.panTo(pt,{animate:false})
+    }
+    return()=>{if(layerRef.current===layer){layer.remove();layerRef.current=null}}
+  },[rows,selected,onSelect])
   return <div className="gi-property-map" ref={node}/>
 }
 
 function PropertyDrawer({property,onClose}){
   const [saved,setSaved]=useState(()=>{try{return JSON.parse(localStorage.getItem('growa_saved_properties')||'[]').includes(property.id)}catch{return false}})
-  const [tab,setTab]=useState('summary')
-  const [detail,setDetail]=useState(null)
-  useEffect(()=>{let active=true;setDetail(null);getPropertyDetail(property.id).then(r=>active&&setDetail(r)).catch(()=>{});return()=>{active=false}},[property.id])
   const toggle=()=>{
     try{
       const current=JSON.parse(localStorage.getItem('growa_saved_properties')||'[]')
@@ -552,222 +566,148 @@ function PropertyDrawer({property,onClose}){
       setSaved(next.includes(property.id))
     }catch{}
   }
-  const location=detail?.location||{}
-  const district=detail?.district
-  const market=detail?.market||{}
-  const latest=market?.latest_month||{}
-  const bench=detail?.benchmarks||{}
+  const price=property.currency==='USD'?'$'+fmt(property.price)+' USD':mxn(property.price)
+  const observed=property.observed_at?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeZone:'UTC'}).format(new Date(property.observed_at+'T00:00:00Z')):'—'
   return <aside className="gi-reonomy-drawer gi-property-detail-v2">
     <div className="gi-reonomy-drawer-top">
       <button onClick={onClose} aria-label="Cerrar ficha"><X size={17}/></button>
-      <div><span>{property.type}</span><small>{property.id}</small></div>
+      <div><span>{property.operation} · {property.type}</span><small>{property.source} · {property.id}</small></div>
       <button className={saved?'saved':''} onClick={toggle} aria-label={saved?'Quitar de guardados':'Guardar propiedad'} aria-pressed={saved}><Bookmark size={16}/></button>
     </div>
-    <div className="gi-reonomy-photo"><MapIcon size={34}/><span>PROPERTY INTELLIGENCE</span><b>{property.opportunity_score}</b></div>
+    <div className="gi-reonomy-photo real-listing"><Building2 size={34}/><span>OFERTA PUBLICADA</span><b>{property.operation}</b></div>
     <div className="gi-reonomy-title">
-      <span>AGEB {property.location_id.slice(-4)} · Mazatlán</span>
-      <h2>{property.title}</h2>
-      <strong>{mxn(property.estimated_value)}</strong>
-      <small>{mxn(property.price_m2)} / m² · referencia simulada</small>
+      <span>{property.zone} · Mazatlán</span>
+      <h2>{property.address||property.title}</h2>
+      <strong>{price}{property.operation==='Renta'?<small> / mes</small>:null}</strong>
+      <small>Consultado {observed} · {property.franchise||property.source}</small>
     </div>
-    <div className="gi-reonomy-tabs">
-      <button className={tab==='summary'?'active':''} onClick={()=>setTab('summary')}>Resumen</button>
-      <button className={tab==='location'?'active':''} onClick={()=>setTab('location')}>Ubicación</button>
-      <button className={tab==='market'?'active':''} onClick={()=>setTab('market')}>Mercado</button>
-      <button className={tab==='data'?'active':''} onClick={()=>setTab('data')}>Datos</button>
-    </div>
-
-    {tab==='summary'&&<>
-      <section className="gi-reonomy-section">
-        <header><span>BUILDING & LOT</span><b>{property.opportunity_score}/100</b></header>
-        <div className="gi-reonomy-specs">
-          <div><span>Tipo de activo</span><strong>{property.type}</strong></div>
-          <div><span>Superficie</span><strong>{fmt(property.area_m2)} m²</strong></div>
-          <div><span>Precio / m²</span><strong>{mxn(property.price_m2)}</strong></div>
-          <div><span>Valor de referencia</span><strong>{mxn(property.estimated_value)}</strong></div>
-        </div>
-      </section>
-      <section className="gi-reonomy-section">
-        <header><span>MARKET POSITION</span><small>percentil dentro del universo demo</small></header>
-        <div className="gr-percentiles">
-          <div><span>Opportunity</span><i><em style={{width:(bench.score_percentile||0)+'%'}}/></i><b>{bench.score_percentile??'—'}º</b></div>
-          <div><span>Precio / m²</span><i><em style={{width:(bench.price_m2_percentile||0)+'%'}}/></i><b>{bench.price_m2_percentile??'—'}º</b></div>
-          <div><span>Superficie</span><i><em style={{width:(bench.area_percentile||0)+'%'}}/></i><b>{bench.area_percentile??'—'}º</b></div>
-          <div><span>Valor</span><i><em style={{width:(bench.value_percentile||0)+'%'}}/></i><b>{bench.value_percentile??'—'}º</b></div>
-        </div>
-      </section>
-    </>}
-
-    {tab==='location'&&<>
-      <section className="gi-reonomy-section">
-        <header><span>LOCATION PROFILE</span><b>{location.opportunity_score??property.opportunity_score}/100</b></header>
-        {!detail?<div className="gr-drawer-loading">Cargando perfil territorial…</div>:<div className="gr-location-kpis">
-          <div><span>Población</span><strong>{fmt(location.population)}</strong></div>
-          <div><span>Hogares</span><strong>{fmt(location.households)}</strong></div>
-          <div><span>Movilidad reciente</span><strong>{pct(location.recent_mobility_share)}</strong></div>
-          <div><span>Adultos</span><strong>{pct(location.adult_share)}</strong></div>
-        </div>}
-      </section>
-      <section className="gi-reonomy-section">
-        <header><span>DISTRITO</span></header>
-        <div className="gr-district-box"><MapPin size={16}/><div><strong>{district?.name||'Sin asignación disponible'}</strong><span>{district?('Opportunity '+district.opportunity_score+'/100'):'Perfil a escala AGEB'}</span></div></div>
-        <button className="gi-reonomy-primary" onClick={()=>go('location',property.location_id)}>Abrir perfil completo <ArrowRight size={13}/></button>
-      </section>
-    </>}
-
-    {tab==='market'&&<>
-      <section className="gi-reonomy-section">
-        <header><span>MARKET CONTEXT</span><small>{market?.observed_through}</small></header>
-        <div className="gr-market-mini">
-          <div><span>Financiamientos · último mes</span><strong>{fmt(latest.actions)}</strong></div>
-          <div><span>Monto · último mes</span><strong>{mxn(latest.amount_mxn)}</strong></div>
-          <div><span>Acciones H1 a/a</span><strong>{market?.h1_comparison?((Number(market.h1_comparison.actions_pct)>=0?'+':'')+pct(market.h1_comparison.actions_pct)):'—'}</strong></div>
-        </div>
-        <p className="gi-reonomy-copy">El contexto de mercado es municipal y se presenta por separado del perfil intraurbano del activo.</p>
-        <button className="gi-reonomy-primary" onClick={()=>go('market')}>Abrir Market Intelligence <ArrowRight size={13}/></button>
-      </section>
-    </>}
-
-    {tab==='data'&&<>
-      <section className="gi-reonomy-section">
-        <header><span>DATA COVERAGE</span></header>
-        <div className="gi-property-roadmap"><p><Check size={13}/> Demografía INEGI por AGEB</p><p><Check size={13}/> Distrito CODESIN</p><p><Check size={13}/> Financiamiento municipal SNIIV</p><p><Check size={13}/> Score territorial derivado</p><p><Plus size={13}/> Predio catastral real</p><p><Plus size={13}/> Propietario y contacto</p><p><Plus size={13}/> Transacciones y comparables</p></div>
-      </section>
-      <section className="gi-reonomy-section"><header><span>NOTA DE MODELO</span></header><p className="gi-reonomy-copy">Superficie, precio y valor del activo son simulados para probar el producto. Las variables de contexto territorial y de mercado están separadas por fuente y escala.</p></section>
-    </>}
+    <section className="gi-reonomy-section">
+      <header><span>CARACTERÍSTICAS</span><b>{property.operation}</b></header>
+      <div className="gi-reonomy-specs">
+        <div><span>Superficie</span><strong>{property.area_m2?fmt(property.area_m2,1)+' m²':'—'}</strong></div>
+        <div><span>Precio / m²</span><strong>{property.price_m2?(property.currency==='USD'?'$'+fmt(property.price_m2)+' USD':mxn(property.price_m2)):'—'}</strong></div>
+        <div><span>Recámaras</span><strong>{property.bedrooms??'—'}</strong></div>
+        <div><span>Baños</span><strong>{property.bathrooms??'—'}</strong></div>
+        <div><span>Estacionamientos</span><strong>{property.parking??'—'}</strong></div>
+        <div><span>Fuente</span><strong>{property.source||'—'}</strong></div>
+      </div>
+    </section>
+    <section className="gi-reonomy-section">
+      <header><span>PUBLICACIÓN</span><small>{observed}</small></header>
+      <div className="gr-location-kpis">
+        <div><span>Zona</span><strong>{property.zone||'—'}</strong></div>
+        <div><span>Inmobiliaria</span><strong>{property.franchise||property.source||'—'}</strong></div>
+      </div>
+      <p className="gi-reonomy-copy">{property.location_precision==='zone_anchor'?'El punto del mapa es una referencia de la zona publicada. No representa la coordenada exacta del inmueble.':'Ubicación tomada de la publicación.'}</p>
+      {property.listing_url?<a className="gi-reonomy-primary gr-external-link" href={property.listing_url} target="_blank" rel="noreferrer">Abrir anuncio original <ArrowUpRight size={13}/></a>:null}
+    </section>
   </aside>
 }
 
 function readStored(key,fallback){try{const data=JSON.parse(localStorage.getItem(key));return data??fallback}catch{return fallback}}
 function exportProperties(rows){
-  const keys=['id','type','location_id','area_m2','price_m2','estimated_value','opportunity_score']
+  const keys=['id','zone','operation','type','address','price','currency','area_m2','price_m2','bedrooms','bathrooms','parking','source','franchise','observed_at','listing_url']
   const cell=v=>'"'+String(v??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"'
-  const csv='\ufeff'+[keys.concat('naturaleza'),...rows.map(r=>keys.map(k=>r[k]).concat('Activo simulado; contexto territorial observado'))].map(r=>r.map(cell).join(',')).join('\r\n')
+  const csv='\ufeff'+[keys,...rows.map(r=>keys.map(k=>r[k]))].map(r=>r.map(cell).join(',')).join('\r\n')
   const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}))
-  const a=document.createElement('a');a.href=url;a.download='Growa_propiedades.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
+  const a=document.createElement('a');a.href=url;a.download='Growa_oferta_inmobiliaria.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
 }
 
 function Properties(){
   const [allRows,setRows]=useState([])
   const [savedOnly,setSavedOnly]=useState(false)
   const [savedIds,setSavedIds]=useState(()=>readStored('growa_saved_properties',[]))
-  const [savedSearch,setSavedSearch]=useState(()=>readStored('growa_property_search_v1',null))
   const [toast,setToast]=useState('')
   const [error,setError]=useState('')
-  const [mapMetric,setMapMetric]=useState('opportunity_score')
-  const rows=savedOnly?allRows.filter(p=>savedIds.includes(p.id)):allRows
+  const [operation,setOperation]=useState('Todos')
+  const [zone,setZone]=useState('Todas')
   const [type,setType]=useState('Todos')
-  const [minScore,setMinScore]=useState(0)
-  const [area,setArea]=useState('all')
-  const [price,setPrice]=useState('all')
   const [query,setQuery]=useState('')
-  const [sort,setSort]=useState('score_desc')
+  const [sort,setSort]=useState('date_desc')
   const [view,setView]=useState('map')
   const [selected,setSelected]=useState(null)
   const [loading,setLoading]=useState(true)
   const [filtersOpen,setFiltersOpen]=useState(()=>window.innerWidth>980)
-  const [layersOpen,setLayersOpen]=useState(false)
+  const rows=savedOnly?allRows.filter(p=>savedIds.includes(p.id)):allRows
 
-  const areaFilter=area==='small'?{maxArea:1200}:area==='medium'?{minArea:1200,maxArea:3000}:area==='large'?{minArea:3000}:{}
-  const priceFilter=price==='low'?{maxPriceM2:18000}:price==='mid'?{minPriceM2:18000,maxPriceM2:26000}:price==='high'?{minPriceM2:26000}:{}
   useEffect(()=>{
     let active=true
     const t=setTimeout(()=>{
       setLoading(true);setError('')
-      getProperties(100,{type,minScore,...areaFilter,...priceFilter,q:query,sort}).then(r=>{
+      getProperties(200,{type,operation,zone,q:query,sort}).then(r=>{
         if(!active)return
         setRows(r.rows||[])
-        if(selected&&!((r.rows||[]).some(x=>x.id===selected.id)))setSelected(null)
-      }).catch(()=>{if(active){setError('No se pudieron cargar los activos. Ajusta un filtro para volver a intentar.');setRows([])}}).finally(()=>active&&setLoading(false))
+        if(selected&&!((r.rows||[]).some(x=>String(x.id)===String(selected.id))))setSelected(null)
+      }).catch(()=>{if(active){setError('No se pudo cargar la oferta inmobiliaria.');setRows([])}}).finally(()=>active&&setLoading(false))
     },120)
     return()=>{active=false;clearTimeout(t)}
-  },[type,minScore,area,price,query,sort])
+  },[type,operation,zone,query,sort])
 
-  const avgScore=rows.length?Math.round(rows.reduce((a,r)=>a+(Number(r.opportunity_score)||0),0)/rows.length):0
-  const avgPrice=rows.length?Math.round(rows.reduce((a,r)=>a+(Number(r.price_m2)||0),0)/rows.length):0
-  const totalValue=rows.reduce((a,r)=>a+(Number(r.estimated_value)||0),0)
-  useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(''),3500);return()=>clearTimeout(timer)},[toast])
-  const saveSearch=()=>{const data={type,minScore,area,price,query,sort};try{localStorage.setItem('growa_property_search_v1',JSON.stringify(data));setSavedSearch(data);setToast('Búsqueda guardada en este navegador.')}catch{setToast('No fue posible guardar en este navegador.')}}
-  const restoreSearch=()=>{if(!savedSearch)return;setType(savedSearch.type);setMinScore(savedSearch.minScore);setArea(savedSearch.area);setPrice(savedSearch.price);setQuery(savedSearch.query);setSort(savedSearch.sort);setSavedOnly(false);setToast('Búsqueda recuperada.')}
-  const clear=()=>{setType('Todos');setMinScore(0);setArea('all');setPrice('all');setQuery('')}
-
+  const sale=rows.filter(p=>p.operation==='Venta')
+  const rent=rows.filter(p=>p.operation==='Renta')
+  const avgSaleM2=sale.filter(p=>Number.isFinite(Number(p.price_m2))).length
+    ?Math.round(sale.reduce((a,p)=>a+(Number(p.price_m2)||0),0)/sale.filter(p=>Number.isFinite(Number(p.price_m2))).length):null
+  const avgRent=rent.length?Math.round(rent.reduce((a,p)=>a+(Number(p.price)||0),0)/rent.length):null
+  useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(''),3000);return()=>clearTimeout(timer)},[toast])
+  const clear=()=>{setOperation('Todos');setZone('Todas');setType('Todos');setQuery('')}
   return <main tabIndex={-1} className="gi-reonomy gi-reonomy-v2">
     <div className="gr-searchbar">
-      <div className="gr-search"><Search size={17}/><input aria-label="Buscar propiedades" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar AGEB, tipo de activo o identificador"/>{query&&<button onClick={()=>setQuery('')}><X size={14}/></button>}</div>
+      <div className="gr-search"><Search size={17}/><input aria-label="Buscar propiedades" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar dirección, zona, inmobiliaria o ID"/>{query&&<button onClick={()=>setQuery('')}><X size={14}/></button>}</div>
       <span className="gr-location"><MapPin size={15}/> Mazatlán, Sinaloa</span>
-      <button className="gr-save" onClick={saveSearch} aria-label="Guardar búsqueda"><Bookmark size={14}/> Guardar búsqueda</button>
+      <button className="gr-save" onClick={()=>{exportProperties(rows);setToast('CSV exportado con la oferta visible.')}}><Download size={14}/> Exportar</button>
     </div>
 
     <div className="gr-toolbar">
       <div>
         <button className={filtersOpen?'active':''} onClick={()=>setFiltersOpen(v=>!v)}><ListFilter size={15}/> Filtros</button>
-        <button className={layersOpen?'active':''} onClick={()=>setLayersOpen(v=>!v)}><Layers3 size={15}/> Capas</button>
         <button className={savedOnly?'active':''} onClick={()=>{setSavedIds(readStored('growa_saved_properties',[]));setSavedOnly(v=>!v)}}><Bookmark size={15}/> Guardados</button>
       </div>
-      <span><b>{rows.length}</b> resultados en Mazatlán</span>
+      <span><b>{rows.length}</b> ofertas publicadas</span>
       <div className="gr-view">
         <button className={view==='map'?'active':''} onClick={()=>setView('map')}><MapIcon size={14}/> Mapa</button>
         <button className={'gr-mobile-only '+(view==='list'?'active':'')} onClick={()=>setView('list')}><LayoutGrid size={14}/> Lista</button>
         <button className={view==='table'?'active':''} onClick={()=>setView('table')}><ListFilter size={14}/> Tabla</button>
       </div>
-      <label>Ordenar <select value={sort} onChange={e=>setSort(e.target.value)}><option value="score_desc">Mayor oportunidad</option><option value="value_desc">Mayor valor</option><option value="price_asc">Menor $/m²</option><option value="area_desc">Mayor superficie</option></select></label>
+      <label>Ordenar <select value={sort} onChange={e=>setSort(e.target.value)}><option value="date_desc">Más reciente</option><option value="price_asc">Menor precio</option><option value="price_desc">Mayor precio</option><option value="price_m2_asc">Menor $/m²</option><option value="area_desc">Mayor superficie</option></select></label>
     </div>
 
     <div className={'gr-shell '+(view==='table'?'table-mode ':view==='list'?'list-mode ':'')+(!filtersOpen?'filters-collapsed ':'')+(selected?'has-drawer':'')}>
       {filtersOpen&&<aside className="gr-filters">
-        <div className="gr-filter-head"><div><strong>Filtros</strong><span>Construye tu universo objetivo</span></div><button onClick={clear}>Limpiar</button></div>
-        <section>
-          <span>TIPO DE ACTIVO</span>
-          <div className="gr-filter-pills">{['Todos','Terreno','Uso mixto','Comercial','Residencial'].map(t=><button key={t} className={type===t?'active':''} onClick={()=>setType(t)}>{t}</button>)}</div>
-        </section>
-        <section>
-          <span>OPPORTUNITY SCORE</span>
-          <div className="gr-range-buttons">{[[0,'Todos'],[60,'60+'],[70,'70+'],[80,'80+']].map(([v,l])=><button key={v} className={minScore===v?'active':''} onClick={()=>setMinScore(v)}>{l}</button>)}</div>
-        </section>
-        <section>
-          <span>SUPERFICIE DE ACTIVO</span>
-          <select aria-label="Superficie de activo" value={area} onChange={e=>setArea(e.target.value)}><option value="all">Cualquier superficie</option><option value="small">Menos de 1,200 m²</option><option value="medium">1,200–3,000 m²</option><option value="large">Más de 3,000 m²</option></select>
-        </section>
-        <section>
-          <span>PRECIO DE REFERENCIA / m²</span>
-          <select aria-label="Precio por metro cuadrado" value={price} onChange={e=>setPrice(e.target.value)}><option value="all">Cualquier precio</option><option value="low">Menos de $18,000</option><option value="mid">$18,000 – $26,000</option><option value="high">Más de $26,000</option></select>
-        </section>
-        <section><span>BÚSQUEDA GUARDADA</span>{savedSearch?<button className="gi-reonomy-primary" onClick={restoreSearch}><Bookmark size={14}/> Recuperar búsqueda</button>:<p className="gr-filter-notice">Guarda tus filtros para recuperarlos en este navegador.</p>}</section>
-        <div className="gr-data-note"><Database size={14}/><div><strong>CATÁLOGO DEMOSTRATIVO</strong><p>Activos, superficies y precios simulados. El contexto de cada AGEB proviene de datos observados.</p></div></div>
+        <div className="gr-filter-head"><div><strong>Filtros</strong><span>Oferta observada</span></div><button onClick={clear}>Limpiar</button></div>
+        <section><span>OPERACIÓN</span><div className="gr-filter-pills">{['Todos','Venta','Renta'].map(v=><button key={v} className={operation===v?'active':''} onClick={()=>setOperation(v)}>{v}</button>)}</div></section>
+        <section><span>ZONA</span><div className="gr-filter-pills">{['Todas','Centro','Marina Mazatlán','Sábalo Country'].map(v=><button key={v} className={zone===v?'active':''} onClick={()=>setZone(v)}>{v}</button>)}</div></section>
+        <section><span>TIPO</span><div className="gr-filter-pills">{['Todos','Departamento','Casa','Loft'].map(v=><button key={v} className={type===v?'active':''} onClick={()=>setType(v)}>{v}</button>)}</div></section>
+        <div className="gr-data-note"><Database size={14}/><div><strong>OFERTA PUBLICADA</strong><p>Precios de anuncio, no precios escriturados. Los puntos se ubican por zona cuando la fuente no publica coordenadas exactas.</p></div></div>
       </aside>}
 
       <section className="gr-results">
         <div className="gr-summary">
-          <div><span>RESULTADOS</span><strong>{rows.length}</strong></div>
-          <div><span>SCORE MEDIO</span><strong>{avgScore}<small>/100</small></strong></div>
-          <div><span>PRECIO MEDIO</span><strong>{mxn(avgPrice)}<small>/m²</small></strong></div>
-          <div><span>VALOR VISIBLE</span><strong>{mxn(totalValue)}</strong></div>
+          <div><span>OFERTAS</span><strong>{rows.length}</strong></div>
+          <div><span>VENTA</span><strong>{sale.length}</strong></div>
+          <div><span>VENTA · $/m² MEDIO</span><strong>{avgSaleM2?mxn(avgSaleM2):'—'}</strong></div>
+          <div><span>RENTA MEDIA</span><strong>{avgRent?mxn(avgRent):'—'}</strong></div>
         </div>
-        <div className="gr-result-head"><span>ACTIVOS · DEMOSTRACIÓN</span><button onClick={()=>exportProperties(rows)} disabled={!rows.length}><Download size={13}/> Exportar CSV</button></div>
+        <div className="gr-result-head"><span>INVENTARIO · FECHA DE CONSULTA EN CADA FICHA</span><button onClick={()=>exportProperties(rows)} disabled={!rows.length}><Download size={13}/> CSV</button></div>
         {loading?<div className="gr-loading">{Array.from({length:6},(_,i)=><i key={i}/>)}</div>:
         <div className="gr-result-list">
           {rows.map(p=><button key={p.id} className={'gr-result '+(selected?.id===p.id?'active':'')} onClick={()=>setSelected(p)}>
-            <div className="gr-thumb"><Building2 size={20}/><span>{p.type}</span></div>
-            <div className="gr-result-copy"><small>{p.id}</small><strong>{p.title}</strong><span>AGEB {p.location_id.slice(-4)} · Mazatlán</span><div><em>{fmt(p.area_m2)} m²</em><em>{mxn(p.price_m2)}/m²</em></div></div>
-            <div className="gr-result-metric"><strong>{mxn(p.estimated_value)}</strong><span>Opportunity {p.opportunity_score}</span><i><em style={{width:p.opportunity_score+'%'}}/></i></div>
+            <div className="gr-thumb"><Building2 size={20}/><span>{p.operation}</span></div>
+            <div className="gr-result-copy"><small>{p.source} · {p.id}</small><strong>{p.address||p.title}</strong><span>{p.zone} · {p.type}</span><div><em>{p.area_m2?fmt(p.area_m2,1)+' m²':'—'}</em><em>{p.bedrooms??'—'} rec. · {p.bathrooms??'—'} baños</em></div></div>
+            <div className="gr-result-metric"><strong>{p.currency==='USD'?'$'+fmt(p.price)+' USD':mxn(p.price)}</strong><span>{p.operation==='Renta'?'mensual':(p.price_m2?mxn(p.price_m2)+'/m²':'precio publicado')}</span></div>
           </button>)}
-          {!rows.length&&<div className="gr-empty"><Search size={24}/><strong>{error||'No hay activos con estos filtros'}</strong><span>Ajusta el universo de búsqueda.</span></div>}
+          {!rows.length&&<div className="gr-empty"><Search size={24}/><strong>{error||'No hay ofertas con estos filtros'}</strong><span>Prueba otra zona u operación.</span></div>}
         </div>}
       </section>
 
       <section className="gr-mapstage">
         {view!=='table'?<>
-          <PropertyMap rows={rows} selected={selected} onSelect={setSelected} metric={mapMetric}/>
-          <div className="gr-map-legend"><strong>{mapMetric==='opportunity_score'?'Score territorial':mapMetric==='price_m2'?'Precio / m² · simulado':'Superficie · simulada'}</strong><span><i className="hi"/> {mapMetric==='opportunity_score'?'80–100':'Alto'}</span><span><i className="mid"/> {mapMetric==='opportunity_score'?'65–79':'Medio'}</span><span><i/> {mapMetric==='opportunity_score'?'<65':'Bajo'}</span></div>
-          <div className="gr-map-count"><MapPin size={13}/>{rows.length} activos en vista</div>
-          {layersOpen&&<div className="gr-layer-menu">
-            <header><strong>Capas del mapa</strong><button onClick={()=>setLayersOpen(false)}><X size={14}/></button></header>
-            {[['opportunity_score','Score territorial'],['price_m2','Precio / m² (simulado)'],['area_m2','Superficie (simulada)']].map(([key,label])=><label key={key}><input type="radio" name="map-layer" checked={mapMetric===key} onChange={()=>setMapMetric(key)}/>{label}</label>)}
-            <small>La geometría representa la AGEB de contexto; no es el límite catastral del inmueble.</small>
-          </div>}
+          <PropertyMap rows={rows} selected={selected} onSelect={setSelected}/>
+          <div className="gr-map-legend real-offer"><strong>Oferta publicada</strong><span><i className="sale"/> Venta</span><span><i className="rent"/> Renta</span></div>
+          <div className="gr-map-count"><MapPin size={13}/>{rows.length} ofertas</div>
+          <div className="gr-map-precision-note">Los puntos con ubicación por zona se distribuyen visualmente alrededor del ancla de la colonia para evitar superposición; no representan coordenadas exactas.</div>
         </>:<div className="gr-table">
-          <div className="gr-table-head"><span>Activo</span><span>Tipo</span><span>Área</span><span>$/m²</span><span>Valor</span><span>Score</span></div>
-          {rows.map(p=><button key={p.id} onClick={()=>setSelected(p)}><span><b>{p.title}</b><small>{p.id}</small></span><span>{p.type}</span><span>{fmt(p.area_m2)} m²</span><span>{mxn(p.price_m2)}</span><span>{mxn(p.estimated_value)}</span><strong>{p.opportunity_score}</strong></button>)}
+          <div className="gr-table-head"><span>Propiedad</span><span>Operación</span><span>Zona</span><span>Área</span><span>Precio</span><span>Fecha</span></div>
+          {rows.map(p=><button key={p.id} onClick={()=>setSelected(p)}><span><b>{p.address||p.title}</b><small>{p.source} · {p.id}</small></span><span>{p.operation}</span><span>{p.zone}</span><span>{p.area_m2?fmt(p.area_m2,1)+' m²':'—'}</span><span>{p.currency==='USD'?'$'+fmt(p.price)+' USD':mxn(p.price)}</span><strong>{p.observed_at||'—'}</strong></button>)}
         </div>}
       </section>
       {selected&&<PropertyDrawer key={selected.id} property={selected} onClose={()=>setSelected(null)}/>}
