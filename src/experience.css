@@ -121,3 +121,44 @@ html{scroll-behavior:smooth;scroll-padding-top:100px}body{font-size:15px;line-he
   .gi-reonomy-v2 .gr-source-strip{padding:5px 10px}
   .gi-reonomy-v2 .gr-source-strip span{font-size:9px}
 }
+
+/* Offer map final layout fix */
+.gi-reonomy-v2{width:100%!important;max-width:100vw!important}
+.gi-reonomy-v2 .gr-shell{width:100%!important;min-width:0!important}
+.gi-reonomy-v2 .gr-filters,
+.gi-reonomy-v2 .gr-results,
+.gi-reonomy-v2 .gr-mapstage{box-sizing:border-box!important;min-width:0!important}
+.gi-reonomy-v2 .gr-filters{padding-left:20px!important}
+.gi-reonomy-v2 .gr-result-list{scrollbar-gutter:stable}
+.gi-reonomy-v2 .gr-mapstage{isolation:isolate}
+.gi-reonomy-v2 .gr-map-count{left:auto!important;right:16px!important;transform:none!important}
+.gi-reonomy-v2 .gr-map-legend{left:auto!important;right:16px!important}
+.gi-reonomy-v2 .gr-map-precision-note{left:16px!important;right:auto!important;max-width:330px!important}
+
+@media(max-width:1450px) and (min-width:761px){
+  .gi-reonomy-v2 .gr-shell,
+  .gi-reonomy-v2 .gr-shell.has-drawer,
+  .gi-reonomy-v2 .gr-shell.filters-collapsed,
+  .gi-reonomy-v2 .gr-shell.filters-collapsed.has-drawer{
+    grid-template-columns:350px minmax(0,1fr)!important;
+  }
+  .gi-reonomy-v2 .gr-filters{
+    left:0!important;
+    margin:0!important;
+    width:270px!important;
+    padding:20px 18px 28px 20px!important;
+    transform:none!important;
+  }
+  .gi-reonomy-v2 .gr-results{width:350px!important}
+  .gi-reonomy-v2 .gr-result{grid-template-columns:64px minmax(0,1fr)!important}
+  .gi-reonomy-v2 .gr-thumb{height:64px!important}
+  .gi-reonomy-v2 .gr-result-metric{
+    grid-column:2!important;
+    align-items:flex-start!important;
+    text-align:left!important;
+    margin-top:7px!important;
+  }
+  .gi-reonomy-v2 .gr-summary{
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  }
+}
