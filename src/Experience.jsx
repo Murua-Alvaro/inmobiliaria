@@ -6,6 +6,7 @@ const number = value => value == null ? '—' : Number(value).toLocaleString('es
 const navigate = (page) => { location.hash = page }
 const products = [
   { title: 'Inteligencia territorial', text: 'Demografía, vivienda y economía en AGEB, distritos y cuadrículas.', icon: MapPin, route: 'territory' },
+  { title: 'Oferta inmobiliaria', text: 'Explora en mapa la oferta publicada de venta y renta.', icon: Building2, route: 'offers' },
   { title: 'Mi cartera inmobiliaria', text: 'Tus propiedades con el contexto de cada ubicación.', icon: Building2, route: 'portfolio' },
   { title: 'Inteligencia de mercado', text: 'Lee las señales del mercado de vivienda.', icon: TrendingUp, route: 'market' },
   { title: 'Datos y metodología', text: 'Conoce las fuentes detrás de cada indicador.', icon: Database, route: 'platform' },
@@ -36,6 +37,7 @@ export function SiteHeader({ page }) {
             {open && <div className="gl-mega" id="platform-menu"><div className="gl-mega-intro"><span>LA PLATAFORMA GROWA</span><h3>Cada ubicación cuenta una historia.</h3><p>Encuentra los datos para entenderla.</p><a href="#platform">Conoce la plataforma <ArrowRight size={16}/></a></div><div className="gl-mega-links">{products.map(({title,text,icon:Icon,route})=><a key={route} href={'#'+route}><Icon size={22}/><span><strong>{title}</strong><small>{text}</small></span><ArrowUpRight size={16}/></a>)}</div></div>}
           </div>
           <a href="#territory" aria-current={page==='territory'?'page':undefined}>Territorio</a>
+          <a href="#offers" aria-current={page==='offers'?'page':undefined}>Ver oferta inmobiliaria</a>
           <a href="#market" aria-current={page==='market'?'page':undefined}>Mercado</a>
           <a href="#platform" aria-current={page==='platform'?'page':undefined}>Nuestros datos</a>
           <a className="gl-button" href="#portfolio">Mi cartera <ArrowUpRight size={17}/></a>
