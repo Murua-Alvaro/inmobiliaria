@@ -531,22 +531,40 @@ async function resolvePropertyPoint(property,cache){
 function PropertyMap({rows=[],selected,onSelect}){
   const node=useRef(null),mapRef=useRef(null),layerRef=useRef(null)
   const [geoPoints,setGeoPoints]=useState({})
+
   useEffect(()=>{
     if(!node.current||mapRef.current)return
-    const map=L.map(node.current,{zoomAnimation:false,fadeAnimation:false,markerZoomAnimation:false,zoomControl:false,attributionControl:true,minZoom:9,maxZoom:18})
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri · geocodificación © OpenStreetMap contributors'}).addTo(map)
+    const map=L.map(node.current,{
+      zoomAnimation:false,
+      fadeAnimation:false,
+      markerZoomAnimation:false,
+      zoomControl:false,
+      attributionControl:true,
+      minZoom:9,
+      maxZoom:18
+    })
+    L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      {maxZoom:19,attribution:'Tiles © Esri · geocodificación © OpenStreetMap contributors'}
+    ).addTo(map)
     L.control.zoom({position:'bottomright'}).addTo(map)
     map.setView([23.245,-106.445],12)
     mapRef.current=map
-    const resize=new ResizeObserver(()=>map.invalidateSize());resize.observe(node.current)
+    const resize=new ResizeObserver(()=>map.invalidateSize())
+    resize.observe(node.current)
     return()=>{resize.disconnect();map.remove();mapRef.current=null}
   },[])
+
   useEffect(()=>{
     let cancelled=false
     const cache=readGeocodeCache()
     const initial={}
-    rows.forEach(p=>{if(cache[String(p.id)])initial[String(p.id)]=cache[String(p.id)]})
+    rows.forEach(p=>{
+      const hit=cache[String(p.id)]
+      if(hit)initial[String(p.id)]=hit
+    })
     setGeoPoints(initial)
+
     ;(async()=>{
       const pending=rows.filter(p=>!cache[String(p.id)])
       for(const property of pending){
@@ -557,30 +575,41 @@ function PropertyMap({rows=[],selected,onSelect}){
         await new Promise(r=>setTimeout(r,1050))
       }
     })()
+
     return()=>{cancelled=true}
   },[rows])
+
   useEffect(()=>{
     const map=mapRef.current
     if(!map)return
     if(layerRef.current)layerRef.current.remove()
+
     const layer=L.layerGroup().addTo(map)
     const points=[]
     const occupied=new Map()
+
     rows.forEach(p=>{
       const resolved=geoPoints[String(p.id)]
       if(!resolved)return
-      let lat=Number(resolved.lat),lng=Number(resolved.lng)
+
+      let lat=Number(resolved.lat)
+      let lng=Number(resolved.lng)
       if(!Number.isFinite(lat)||!Number.isFinite(lng))return
+
       const coordKey=lat.toFixed(5)+'|'+lng.toFixed(5)
       const idx=occupied.get(coordKey)||0
       occupied.set(coordKey,idx+1)
+
       if(idx>0){
         const angle=idx*2.399963
         const ring=.00016*Math.sqrt(idx)
-        lat+=Math.sin(angle)*ring;lng+=Math.cos(angle)*ring
+        lat+=Math.sin(angle)*ring
+        lng+=Math.cos(angle)*ring
       }
+
       const pt=[lat,lng]
       points.push(pt)
+
       const active=selected&&String(selected.id)===String(p.id)
       const marker=L.circleMarker(pt,{
         radius:active?8:6,
@@ -589,7 +618,53 @@ function PropertyMap({rows=[],selected,onSelect}){
         fillColor:p.operation==='Renta'?'#b98235':'#0b8588',
         fillOpacity:.94
       }).addTo(layer)
-      const price=p.currency==='USD'?'
+
+      const price=p.currency==='USD'
+        ? '$'+fmt(p.price)+' USD'
+        : mxn(p.price)
+      const precisionLabel=
+        resolved.precision==='address_or_place'
+          ? 'dirección/desarrollo'
+          : resolved.precision==='zone'
+            ? 'colonia/zona'
+            : 'zona aproximada'
+
+      marker.bindTooltip(
+        '<div class="gi-map-tip"><small>'+
+        String(p.operation||'Oferta')+' · '+String(p.zone||'Mazatlán')+
+        '</small><strong>'+price+
+        '</strong><span>'+String(p.address||p.type||'Propiedad')+
+        '</span><em>'+precisionLabel+'</em></div>',
+        {direction:'top',offset:[0,-5]}
+      )
+      marker.on('click',()=>onSelect?.({...p,map_location:resolved}))
+    })
+
+    layerRef.current=layer
+
+    if(points.length&&!selected){
+      const bounds=L.latLngBounds(points)
+      if(bounds.isValid())map.fitBounds(bounds.pad(.12),{maxZoom:15,padding:[24,24]})
+    }
+
+    if(selected){
+      const resolved=geoPoints[String(selected.id)]||selected.map_location
+      if(resolved){
+        const lat=Number(resolved.lat),lng=Number(resolved.lng)
+        if(Number.isFinite(lat)&&Number.isFinite(lng))map.panTo([lat,lng],{animate:false})
+      }
+    }
+
+    return()=>{
+      if(layerRef.current===layer){
+        layer.remove()
+        layerRef.current=null
+      }
+    }
+  },[rows,selected,onSelect,geoPoints])
+
+  return <div className="gi-property-map" ref={node}/>
+}
 
 function PropertyDrawer({property,onClose}){
   const [saved,setSaved]=useState(()=>{try{return JSON.parse(localStorage.getItem('growa_saved_properties')||'[]').includes(property.id)}catch{return false}})
