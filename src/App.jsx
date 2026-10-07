@@ -487,21 +487,54 @@ function Market(){
   </main>
 }
 
-function displayPoint(property,index,groupSize){
+const PROPERTY_GEOCODE_CACHE='growa_property_geocode_v1'
+function readGeocodeCache(){try{return JSON.parse(localStorage.getItem(PROPERTY_GEOCODE_CACHE)||'{}')}catch{return {}}}
+function writeGeocodeCache(cache){try{localStorage.setItem(PROPERTY_GEOCODE_CACHE,JSON.stringify(cache))}catch{}}
+function cleanGeocodeText(value=''){
+  return String(value).replace(/\bNA\b/gi,'').replace(/#S\/N/gi,'').replace(/\s+/g,' ').replace(/^\s*[\/,-]+|[\/,-]+\s*$/g,'').trim()
+}
+function geocodeQuery(property){
+  const address=cleanGeocodeText(property.address||'')
+  if(address && !/^s\/c$/i.test(address) && address.length>4){
+    return address+', '+property.zone+', Mazatlán, Sinaloa, México'
+  }
+  return (property.zone||'Mazatlán')+', Mazatlán, Sinaloa, México'
+}
+async function resolvePropertyPoint(property,cache){
+  const key=String(property.id)
+  if(cache[key]&&Number.isFinite(cache[key].lat)&&Number.isFinite(cache[key].lng))return cache[key]
+  const query=geocodeQuery(property)
+  try{
+    const url='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=mx&viewbox=-106.56,23.34,-106.32,23.12&bounded=1&q='+encodeURIComponent(query)
+    const response=await fetch(url,{headers:{Accept:'application/json'}})
+    if(response.ok){
+      const rows=await response.json()
+      const hit=rows?.[0]
+      const lat=Number(hit?.lat),lng=Number(hit?.lon)
+      if(Number.isFinite(lat)&&Number.isFinite(lng)){
+        const display=String(hit.display_name||'').toLowerCase()
+        const usedAddress=cleanGeocodeText(property.address||'')
+        const precision=usedAddress&&query.toLowerCase().startsWith(usedAddress.toLowerCase())?'address_or_place':'zone'
+        const result={lat,lng,precision,label:hit.display_name||query,query}
+        cache[key]=result;writeGeocodeCache(cache);return result
+      }
+    }
+  }catch{}
   const lat=Number(property.lat),lng=Number(property.lng)
-  if(!Number.isFinite(lat)||!Number.isFinite(lng))return null
-  if(groupSize<=1||property.location_precision!=='zone_anchor')return [lat,lng]
-  const angle=(index/groupSize)*Math.PI*2
-  const ring=0.00115+0.00042*(index%3)
-  return [lat+Math.sin(angle)*ring,lng+Math.cos(angle)*ring]
+  if(Number.isFinite(lat)&&Number.isFinite(lng)){
+    const result={lat,lng,precision:'zone_fallback',label:property.zone,query}
+    cache[key]=result;writeGeocodeCache(cache);return result
+  }
+  return null
 }
 
 function PropertyMap({rows=[],selected,onSelect}){
   const node=useRef(null),mapRef=useRef(null),layerRef=useRef(null)
+  const [geoPoints,setGeoPoints]=useState({})
   useEffect(()=>{
     if(!node.current||mapRef.current)return
     const map=L.map(node.current,{zoomAnimation:false,fadeAnimation:false,markerZoomAnimation:false,zoomControl:false,attributionControl:true,minZoom:9,maxZoom:18})
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'}).addTo(map)
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri · geocodificación © OpenStreetMap contributors'}).addTo(map)
     L.control.zoom({position:'bottomright'}).addTo(map)
     map.setView([23.245,-106.445],12)
     mapRef.current=map
@@ -509,50 +542,260 @@ function PropertyMap({rows=[],selected,onSelect}){
     return()=>{resize.disconnect();map.remove();mapRef.current=null}
   },[])
   useEffect(()=>{
+    let cancelled=false
+    const cache=readGeocodeCache()
+    const initial={}
+    rows.forEach(p=>{if(cache[String(p.id)])initial[String(p.id)]=cache[String(p.id)]})
+    setGeoPoints(initial)
+    ;(async()=>{
+      const pending=rows.filter(p=>!cache[String(p.id)])
+      for(const property of pending){
+        if(cancelled)break
+        const point=await resolvePropertyPoint(property,cache)
+        if(cancelled)break
+        if(point)setGeoPoints(prev=>({...prev,[String(property.id)]:point}))
+        await new Promise(r=>setTimeout(r,1050))
+      }
+    })()
+    return()=>{cancelled=true}
+  },[rows])
+  useEffect(()=>{
     const map=mapRef.current
     if(!map)return
     if(layerRef.current)layerRef.current.remove()
     const layer=L.layerGroup().addTo(map)
-    const groups=new Map()
-    rows.forEach(p=>{
-      const key=(p.zone||'')+'|'+p.lat+'|'+p.lng
-      if(!groups.has(key))groups.set(key,[])
-      groups.get(key).push(p)
-    })
     const points=[]
-    groups.forEach(group=>{
-      group.forEach((p,i)=>{
-        const pt=displayPoint(p,i,group.length)
-        if(!pt)return
-        points.push(pt)
-        const active=selected&&String(selected.id)===String(p.id)
-        const marker=L.circleMarker(pt,{
-          radius:active?8:6,
-          color:active?'#083f47':'#ffffff',
-          weight:active?3:2,
-          fillColor:p.operation==='Renta'?'#b98235':'#0b8588',
-          fillOpacity:.94
-        }).addTo(layer)
-        const price=p.currency==='USD'
-          ?'$'+fmt(p.price)+' USD'
-          :mxn(p.price)
-        marker.bindTooltip('<div class="gi-map-tip"><small>'+String(p.operation||'Oferta')+' · '+String(p.zone||'Mazatlán')+'</small><strong>'+price+'</strong><span>'+String(p.address||p.type||'Propiedad')+'</span></div>',{direction:'top',offset:[0,-5]})
-        marker.on('click',()=>onSelect?.(p))
-      })
+    const occupied=new Map()
+    rows.forEach(p=>{
+      const resolved=geoPoints[String(p.id)]
+      if(!resolved)return
+      let lat=Number(resolved.lat),lng=Number(resolved.lng)
+      if(!Number.isFinite(lat)||!Number.isFinite(lng))return
+      const coordKey=lat.toFixed(5)+'|'+lng.toFixed(5)
+      const idx=occupied.get(coordKey)||0
+      occupied.set(coordKey,idx+1)
+      if(idx>0){
+        const angle=idx*2.399963
+        const ring=.00016*Math.sqrt(idx)
+        lat+=Math.sin(angle)*ring;lng+=Math.cos(angle)*ring
+      }
+      const pt=[lat,lng]
+      points.push(pt)
+      const active=selected&&String(selected.id)===String(p.id)
+      const marker=L.circleMarker(pt,{
+        radius:active?8:6,
+        color:active?'#083f47':'#ffffff',
+        weight:active?3:2,
+        fillColor:p.operation==='Renta'?'#b98235':'#0b8588',
+        fillOpacity:.94
+      }).addTo(layer)
+      const price=p.currency==='USD'?'
+
+function PropertyDrawer({property,onClose}){
+  const [saved,setSaved]=useState(()=>{try{return JSON.parse(localStorage.getItem('growa_saved_properties')||'[]').includes(property.id)}catch{return false}})
+  const toggle=()=>{
+    try{
+      const current=JSON.parse(localStorage.getItem('growa_saved_properties')||'[]')
+      const next=current.includes(property.id)?current.filter(x=>x!==property.id):[...current,property.id]
+      localStorage.setItem('growa_saved_properties',JSON.stringify(next))
+      setSaved(next.includes(property.id))
+    }catch{}
+  }
+  const price=property.currency==='USD'?'$'+fmt(property.price)+' USD':mxn(property.price)
+  const observed=property.observed_at?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeZone:'UTC'}).format(new Date(property.observed_at+'T00:00:00Z')):'—'
+  return <aside className="gi-reonomy-drawer gi-property-detail-v2">
+    <div className="gi-reonomy-drawer-top">
+      <button onClick={onClose} aria-label="Cerrar ficha"><X size={17}/></button>
+      <div><span>{property.operation} · {property.type}</span><small>{property.source} · {property.id}</small></div>
+      <button className={saved?'saved':''} onClick={toggle} aria-label={saved?'Quitar de guardados':'Guardar propiedad'} aria-pressed={saved}><Bookmark size={16}/></button>
+    </div>
+    <div className="gi-reonomy-photo real-listing"><Building2 size={34}/><span>OFERTA PUBLICADA</span><b>{property.operation}</b></div>
+    <div className="gi-reonomy-title">
+      <span>{property.zone} · Mazatlán</span>
+      <h2>{property.address||property.title}</h2>
+      <strong>{price}{property.operation==='Renta'?<small> / mes</small>:null}</strong>
+      <small>Consultado {observed} · {property.franchise||property.source}</small>
+    </div>
+    <section className="gi-reonomy-section">
+      <header><span>CARACTERÍSTICAS</span><b>{property.operation}</b></header>
+      <div className="gi-reonomy-specs">
+        <div><span>Superficie</span><strong>{property.area_m2?fmt(property.area_m2,1)+' m²':'—'}</strong></div>
+        <div><span>Precio / m²</span><strong>{property.price_m2?(property.currency==='USD'?'$'+fmt(property.price_m2)+' USD':mxn(property.price_m2)):'—'}</strong></div>
+        <div><span>Recámaras</span><strong>{property.bedrooms??'—'}</strong></div>
+        <div><span>Baños</span><strong>{property.bathrooms??'—'}</strong></div>
+        <div><span>Estacionamientos</span><strong>{property.parking??'—'}</strong></div>
+        <div><span>Fuente</span><strong>{property.source||'—'}</strong></div>
+      </div>
+    </section>
+    <section className="gi-reonomy-section">
+      <header><span>PUBLICACIÓN</span><small>{observed}</small></header>
+      <div className="gr-location-kpis">
+        <div><span>Zona</span><strong>{property.zone||'—'}</strong></div>
+        <div><span>Inmobiliaria</span><strong>{property.franchise||property.source||'—'}</strong></div>
+      </div>
+      <p className="gi-reonomy-copy">{property.map_location?.precision==='address_or_place'?'El punto se obtuvo geocodificando la dirección o desarrollo publicado.':property.map_location?.precision==='zone'?'El punto corresponde a la colonia o zona publicada.':'Cuando la dirección no puede resolverse, el mapa usa una referencia aproximada de la zona.'}</p>
+      {property.listing_url?<a className="gi-reonomy-primary gr-external-link" href={property.listing_url} target="_blank" rel="noreferrer">Abrir anuncio original <ArrowUpRight size={13}/></a>:null}
+    </section>
+  </aside>
+}
+
+function readStored(key,fallback){try{const data=JSON.parse(localStorage.getItem(key));return data??fallback}catch{return fallback}}
+function exportProperties(rows){
+  const keys=['id','zone','operation','type','address','price','currency','area_m2','price_m2','bedrooms','bathrooms','parking','source','franchise','observed_at','listing_url']
+  const cell=v=>'"'+String(v??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"'
+  const csv='\ufeff'+[keys,...rows.map(r=>keys.map(k=>r[k]))].map(r=>r.map(cell).join(',')).join('\r\n')
+  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}))
+  const a=document.createElement('a');a.href=url;a.download='Growa_oferta_inmobiliaria.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
+}
+
+function Properties(){
+  const [allRows,setRows]=useState([])
+  const [savedOnly,setSavedOnly]=useState(false)
+  const [savedIds,setSavedIds]=useState(()=>readStored('growa_saved_properties',[]))
+  const [toast,setToast]=useState('')
+  const [error,setError]=useState('')
+  const [operation,setOperation]=useState('Todos')
+  const [zone,setZone]=useState('Todas')
+  const [type,setType]=useState('Todos')
+  const [query,setQuery]=useState('')
+  const [sort,setSort]=useState('date_desc')
+  const [view,setView]=useState('map')
+  const [selected,setSelected]=useState(null)
+  const [loading,setLoading]=useState(true)
+  const [filtersOpen,setFiltersOpen]=useState(()=>window.innerWidth>980)
+  const rows=savedOnly?allRows.filter(p=>savedIds.includes(p.id)):allRows
+
+  useEffect(()=>{
+    let active=true
+    const t=setTimeout(()=>{
+      setLoading(true);setError('')
+      getProperties(200,{type,operation,zone,q:query,sort}).then(r=>{
+        if(!active)return
+        setRows(r.rows||[])
+        if(selected&&!((r.rows||[]).some(x=>String(x.id)===String(selected.id))))setSelected(null)
+      }).catch(()=>{if(active){setError('No se pudo cargar la oferta inmobiliaria.');setRows([])}}).finally(()=>active&&setLoading(false))
+    },120)
+    return()=>{active=false;clearTimeout(t)}
+  },[type,operation,zone,query,sort])
+
+  const sale=rows.filter(p=>p.operation==='Venta')
+  const rent=rows.filter(p=>p.operation==='Renta')
+  const avgSaleM2=sale.filter(p=>Number.isFinite(Number(p.price_m2))).length
+    ?Math.round(sale.reduce((a,p)=>a+(Number(p.price_m2)||0),0)/sale.filter(p=>Number.isFinite(Number(p.price_m2))).length):null
+  const avgRent=rent.length?Math.round(rent.reduce((a,p)=>a+(Number(p.price)||0),0)/rent.length):null
+  useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(''),3000);return()=>clearTimeout(timer)},[toast])
+  const clear=()=>{setOperation('Todos');setZone('Todas');setType('Todos');setQuery('')}
+  return <main tabIndex={-1} className="gi-reonomy gi-reonomy-v2">
+    <div className="gr-searchbar">
+      <div className="gr-search"><Search size={17}/><input aria-label="Buscar propiedades" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar dirección, zona, inmobiliaria o ID"/>{query&&<button onClick={()=>setQuery('')}><X size={14}/></button>}</div>
+      <span className="gr-location"><MapPin size={15}/> Mazatlán, Sinaloa</span>
+      <button className="gr-save" onClick={()=>{exportProperties(rows);setToast('CSV exportado con la oferta visible.')}}><Download size={14}/> Exportar</button>
+    </div>
+
+    <div className="gr-toolbar">
+      <div>
+        <button className={filtersOpen?'active':''} onClick={()=>setFiltersOpen(v=>!v)}><ListFilter size={15}/> Filtros</button>
+        <button className={savedOnly?'active':''} onClick={()=>{setSavedIds(readStored('growa_saved_properties',[]));setSavedOnly(v=>!v)}}><Bookmark size={15}/> Guardados</button>
+      </div>
+      <span><b>{rows.length}</b> ofertas publicadas</span>
+      <div className="gr-view">
+        <button className={view==='map'?'active':''} onClick={()=>setView('map')}><MapIcon size={14}/> Mapa</button>
+        <button className={'gr-mobile-only '+(view==='list'?'active':'')} onClick={()=>setView('list')}><LayoutGrid size={14}/> Lista</button>
+        <button className={view==='table'?'active':''} onClick={()=>setView('table')}><ListFilter size={14}/> Tabla</button>
+      </div>
+      <label>Ordenar <select value={sort} onChange={e=>setSort(e.target.value)}><option value="date_desc">Más reciente</option><option value="price_asc">Menor precio</option><option value="price_desc">Mayor precio</option><option value="price_m2_asc">Menor $/m²</option><option value="area_desc">Mayor superficie</option></select></label>
+    </div>
+
+    <div className={'gr-shell '+(view==='table'?'table-mode ':view==='list'?'list-mode ':'')+(!filtersOpen?'filters-collapsed ':'')+(selected?'has-drawer':'')}>
+      {filtersOpen&&<aside className="gr-filters">
+        <div className="gr-filter-head"><div><strong>Filtros</strong><span>Oferta observada</span></div><button onClick={clear}>Limpiar</button></div>
+        <section><span>OPERACIÓN</span><div className="gr-filter-pills">{['Todos','Venta','Renta'].map(v=><button key={v} className={operation===v?'active':''} onClick={()=>setOperation(v)}>{v}</button>)}</div></section>
+        <section><span>ZONA</span><div className="gr-filter-pills">{['Todas','Centro','Marina Mazatlán','Sábalo Country'].map(v=><button key={v} className={zone===v?'active':''} onClick={()=>setZone(v)}>{v}</button>)}</div></section>
+        <section><span>TIPO</span><div className="gr-filter-pills">{['Todos','Departamento','Casa','Loft'].map(v=><button key={v} className={type===v?'active':''} onClick={()=>setType(v)}>{v}</button>)}</div></section>
+        <div className="gr-data-note"><Database size={14}/><div><strong>OFERTA PUBLICADA</strong><p>Precios de anuncio, no precios escriturados. Los puntos se ubican por zona cuando la fuente no publica coordenadas exactas.</p></div></div>
+      </aside>}
+
+      <section className="gr-results">
+        <div className="gr-summary">
+          <div><span>OFERTAS</span><strong>{rows.length}</strong></div>
+          <div><span>VENTA</span><strong>{sale.length}</strong></div>
+          <div><span>VENTA · $/m² MEDIO</span><strong>{avgSaleM2?mxn(avgSaleM2):'—'}</strong></div>
+          <div><span>RENTA MEDIA</span><strong>{avgRent?mxn(avgRent):'—'}</strong></div>
+        </div>
+        <div className="gr-result-head"><span>INVENTARIO · FECHA DE CONSULTA EN CADA FICHA</span><button onClick={()=>exportProperties(rows)} disabled={!rows.length}><Download size={13}/> CSV</button></div>
+        {loading?<div className="gr-loading">{Array.from({length:6},(_,i)=><i key={i}/>)}</div>:
+        <div className="gr-result-list">
+          {rows.map(p=><button key={p.id} className={'gr-result '+(selected?.id===p.id?'active':'')} onClick={()=>setSelected(p)}>
+            <div className="gr-thumb"><Building2 size={20}/><span>{p.operation}</span></div>
+            <div className="gr-result-copy"><small>{p.source} · {p.id}</small><strong>{p.address||p.title}</strong><span>{p.zone} · {p.type}</span><div><em>{p.area_m2?fmt(p.area_m2,1)+' m²':'—'}</em><em>{p.bedrooms??'—'} rec. · {p.bathrooms??'—'} baños</em></div></div>
+            <div className="gr-result-metric"><strong>{p.currency==='USD'?'$'+fmt(p.price)+' USD':mxn(p.price)}</strong><span>{p.operation==='Renta'?'mensual':(p.price_m2?mxn(p.price_m2)+'/m²':'precio publicado')}</span></div>
+          </button>)}
+          {!rows.length&&<div className="gr-empty"><Search size={24}/><strong>{error||'No hay ofertas con estos filtros'}</strong><span>Prueba otra zona u operación.</span></div>}
+        </div>}
+      </section>
+
+      <section className="gr-mapstage">
+        {view!=='table'?<>
+          <PropertyMap rows={rows} selected={selected} onSelect={setSelected}/>
+          <div className="gr-map-legend real-offer"><strong>Oferta publicada</strong><span><i className="sale"/> Venta</span><span><i className="rent"/> Renta</span></div>
+          <div className="gr-map-count"><MapPin size={13}/>{rows.length} ofertas</div>
+          <div className="gr-map-precision-note">Ubicación por prioridad: dirección o desarrollo publicado → colonia/zona → referencia aproximada. El mapa indica el nivel de precisión de cada punto.</div>
+        </>:<div className="gr-table">
+          <div className="gr-table-head"><span>Propiedad</span><span>Operación</span><span>Zona</span><span>Área</span><span>Precio</span><span>Fecha</span></div>
+          {rows.map(p=><button key={p.id} onClick={()=>setSelected(p)}><span><b>{p.address||p.title}</b><small>{p.source} · {p.id}</small></span><span>{p.operation}</span><span>{p.zone}</span><span>{p.area_m2?fmt(p.area_m2,1)+' m²':'—'}</span><span>{p.currency==='USD'?'$'+fmt(p.price)+' USD':mxn(p.price)}</span><strong>{p.observed_at||'—'}</strong></button>)}
+        </div>}
+      </section>
+      {selected&&<PropertyDrawer key={selected.id} property={selected} onClose={()=>setSelected(null)}/>}
+    </div>
+    {toast&&<div className="gr-toast" role="status">{toast}</div>}
+  </main>
+}
+
+function App(){
+  const [route,setRoute]=useState(routeFromHash)
+  useEffect(()=>{
+    const handler=()=>{setRoute(routeFromHash());window.scrollTo(0,0)}
+    addEventListener('hashchange',handler)
+    if(!location.hash)location.hash='home'
+    return()=>removeEventListener('hashchange',handler)
+  },[])
+  const status=apiStatus()
+  const page=route.page
+  let content=<Landing/>
+  if(page==='platform')content=<DataPlatform/>
+  else if(page==='property-intelligence')content=<PropertyIntelligenceRedirect/>
+  else if(page==='locations')content=<Locations/>
+  else if(page==='location'&&route.id)content=<LocationProfile key={route.id} id={route.id}/>
+  else if(page==='district'&&route.id)content=<DistrictProfile key={route.id} slug={route.id}/>
+  else if(page==='market')content=<Market/>
+  else if(page==='properties')content=<Properties/>
+  else if(page==='territory')content=<TerritoryWorkspace/>
+  else if(page.split('?')[0]==='portfolio')content=<Portfolio/>
+  return <div className="gi-app">
+    <a className="gl-skip" href="#main-content" onClick={e=>{e.preventDefault();document.querySelector('main')?.focus()}}>Ir al contenido</a>
+    <SiteHeader page={page}/>
+    {content}
+    <SiteFooter/>
+  </div>
+}
+
+export default App
++fmt(p.price)+' USD':mxn(p.price)
+      const precisionLabel=resolved.precision==='address_or_place'?'dirección/desarrollo':resolved.precision==='zone'?'colonia/zona':'zona aproximada'
+      marker.bindTooltip('<div class="gi-map-tip"><small>'+String(p.operation||'Oferta')+' · '+String(p.zone||'Mazatlán')+'</small><strong>'+price+'</strong><span>'+String(p.address||p.type||'Propiedad')+'</span><em>'+precisionLabel+'</em></div>',{direction:'top',offset:[0,-5]})
+      marker.on('click',()=>onSelect?.({...p,map_location:resolved}))
     })
     layerRef.current=layer
     if(points.length&&!selected){
       const bounds=L.latLngBounds(points)
-      if(bounds.isValid())map.fitBounds(bounds.pad(.18),{maxZoom:14,padding:[24,24]})
+      if(bounds.isValid())map.fitBounds(bounds.pad(.12),{maxZoom:15,padding:[24,24]})
     }
     if(selected){
-      const group=groups.get((selected.zone||'')+'|'+selected.lat+'|'+selected.lng)||[selected]
-      const idx=Math.max(0,group.findIndex(x=>String(x.id)===String(selected.id)))
-      const pt=displayPoint(selected,idx,group.length)
-      if(pt)map.panTo(pt,{animate:false})
+      const resolved=geoPoints[String(selected.id)]||selected.map_location
+      if(resolved)map.panTo([Number(resolved.lat),Number(resolved.lng)],{animate:false})
     }
     return()=>{if(layerRef.current===layer){layer.remove();layerRef.current=null}}
-  },[rows,selected,onSelect])
+  },[rows,selected,onSelect,geoPoints])
   return <div className="gi-property-map" ref={node}/>
 }
 
