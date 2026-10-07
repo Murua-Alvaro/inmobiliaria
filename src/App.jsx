@@ -493,6 +493,11 @@ const MAP_ZONE_ALIASES={
   'marina mazatlan':['marina mazatlan','marina'],
   'sabalo country':['sabalo country club','sabalo country']
 }
+const SAFE_ZONE_ANCHORS={
+  'centro':{lat:23.2019,lng:-106.4217,label:'Centro'},
+  'marina mazatlan':{lat:23.2636,lng:-106.4624,label:'Marina Mazatlán'},
+  'sabalo country':{lat:23.2528,lng:-106.4554,label:'Sábalo Country'}
+}
 function mapFold(value=''){
   return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()
 }
@@ -561,9 +566,13 @@ function pointInGeometry(lng,lat,geometry){
   return false
 }
 function fallbackPoint(property,colonias){
-  const feature=matchColony(property,colonias)
+  const feature=colonias?matchColony(property,colonias):null
   const center=geometryBoundsCenter(feature)
   if(center)return {...center,precision:'colonia',label:colonyName(feature)||property.zone,colony_feature:feature}
+  const anchor=SAFE_ZONE_ANCHORS[mapFold(property.zone)]
+  if(anchor)return {...anchor,precision:'zona_segura'}
+  const lat=Number(property.lat),lng=Number(property.lng)
+  if(Number.isFinite(lat)&&Number.isFinite(lng))return {lat,lng,precision:'zona_segura',label:property.zone||'Mazatlán'}
   return null
 }
 function readGeocodeCache(){try{return JSON.parse(localStorage.getItem(PROPERTY_GEOCODE_CACHE)||'{}')}catch{return {}}}
@@ -619,15 +628,19 @@ function PropertyMap({rows=[],selected,onSelect}){
   },[])
 
   useEffect(()=>{
-    if(!colonias)return
     const cache=readGeocodeCache()
     const next={}
     rows.forEach(p=>{
       const key=String(p.id)
       const cached=cache[key]
-      const feature=matchColony(p,colonias)
-      if(cached&&Number.isFinite(Number(cached.lat))&&Number.isFinite(Number(cached.lng))&&feature&&pointInGeometry(Number(cached.lng),Number(cached.lat),feature.geometry)){
-        next[key]={...cached,precision:'direccion'}
+      const feature=colonias?matchColony(p,colonias):null
+      if(
+        cached&&
+        Number.isFinite(Number(cached.lat))&&
+        Number.isFinite(Number(cached.lng))&&
+        (!feature||pointInGeometry(Number(cached.lng),Number(cached.lat),feature.geometry))
+      ){
+        next[key]={...cached,precision:feature?'direccion':'direccion_cache'}
       }else{
         const fallback=fallbackPoint(p,colonias)
         if(fallback)next[key]=fallback
@@ -638,13 +651,13 @@ function PropertyMap({rows=[],selected,onSelect}){
 
   useEffect(()=>{
     const map=mapRef.current
-    if(!map||!colonias)return
+    if(!map)return
     if(layerRef.current)layerRef.current.remove()
 
     const layer=L.layerGroup().addTo(map)
     const zoneFeatures=[]
     const seenZones=new Set()
-    rows.forEach(p=>{
+    if(colonias)rows.forEach(p=>{
       const feature=matchColony(p,colonias)
       const name=colonyName(feature)
       if(feature&&name&&!seenZones.has(name)){
@@ -671,9 +684,9 @@ function PropertyMap({rows=[],selected,onSelect}){
       const coordKey=lat.toFixed(5)+'|'+lng.toFixed(5)
       const idx=occupied.get(coordKey)||0
       occupied.set(coordKey,idx+1)
-      if(idx>0&&resolved.precision!=='direccion'){
+      if(idx>0&&resolved.precision!=='direccion'&&resolved.precision!=='direccion_cache'){
         const angle=idx*2.399963
-        const ring=.00013*Math.sqrt(idx)
+        const ring=.00018*Math.sqrt(idx)
         lat+=Math.sin(angle)*ring
         lng+=Math.cos(angle)*ring
       }
@@ -690,7 +703,12 @@ function PropertyMap({rows=[],selected,onSelect}){
       }).addTo(layer)
 
       const price=p.currency==='USD'?'$'+fmt(p.price)+' USD':mxn(p.price)
-      const precisionLabel=resolved.precision==='direccion'?'dirección validada':'colonia publicada'
+      const precisionLabel=
+        resolved.precision==='direccion'||resolved.precision==='direccion_cache'
+          ?'dirección'
+          : resolved.precision==='colonia'
+            ?'colonia publicada'
+            :'zona publicada'
       marker.bindTooltip(
         '<div class="gi-map-tip"><small>'+String(p.operation||'Oferta')+' · '+String(p.zone||'Mazatlán')+
         '</small><strong>'+price+'</strong><span>'+String(p.address||p.type||'Propiedad')+
@@ -699,7 +717,7 @@ function PropertyMap({rows=[],selected,onSelect}){
       )
       marker.on('click',async()=>{
         let chosen={...p,map_location:resolved}
-        if(resolved.precision!=='direccion'){
+        if(colonias&&resolved.precision!=='direccion'&&resolved.precision!=='direccion_cache'){
           const refined=await geocodePublishedAddress(p,colonias)
           if(refined){
             const cache=readGeocodeCache()
@@ -773,7 +791,11 @@ function PropertyDrawer({property,onClose}){
         <div><span>Zona</span><strong>{property.zone||'—'}</strong></div>
         <div><span>Inmobiliaria</span><strong>{property.franchise||property.source||'—'}</strong></div>
       </div>
-      <p className="gi-reonomy-copy">{property.map_location?.precision==='direccion'?'El punto corresponde a una dirección publicada que fue validada dentro de la colonia.':'El punto se ubica dentro de la colonia publicada; no se presenta como coordenada exacta cuando la fuente no la proporciona.'}</p>
+      <p className="gi-reonomy-copy">{property.map_location?.precision==='direccion'||property.map_location?.precision==='direccion_cache'
+  ?'El punto corresponde a una dirección publicada.'
+  :property.map_location?.precision==='colonia'
+    ?'El punto se ubica dentro de la colonia publicada; no se presenta como coordenada exacta.'
+    :'El punto usa una referencia segura de la zona publicada mientras no exista una coordenada más precisa.'}</p>
       {property.listing_url?<a className="gi-reonomy-primary gr-external-link" href={property.listing_url} target="_blank" rel="noreferrer">Abrir anuncio original <ArrowUpRight size={13}/></a>:null}
     </section>
   </aside>
