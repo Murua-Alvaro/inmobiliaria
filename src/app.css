@@ -276,3 +276,12 @@ body{font-size:14px}.gi-app{background:#fff;color:var(--g-ink)}
 .gr-district-box{display:flex;align-items:center;gap:10px;border:1px solid #e0e9e9;border-radius:5px;padding:12px;margin-bottom:10px;color:#4b6f74}.gr-district-box>div{display:flex;flex-direction:column;gap:3px}.gr-district-box strong{font-size:11px}.gr-district-box span{font-size:11px;color:#82979a}
 .gr-market-mini{display:grid;grid-template-columns:1fr 1fr;gap:8px}.gr-market-mini>div{border:1px solid #e1e9e9;border-radius:5px;padding:11px}.gr-market-mini>div:first-child{grid-column:1/-1}.gr-market-mini span{display:block;font-size:11px;color:#83989b}.gr-market-mini strong{display:block;font:600 14px Manrope,sans-serif;margin-top:5px}.gr-drawer-loading{padding:20px 0;font-size:11px;color:#82979a}
 @media(max-width:760px){.gp-coverage-line{grid-template-columns:1fr;margin-top:-40px}.gp-coverage-line>div{min-height:62px}}
+
+/* Real property supply layer */
+.gi-reonomy-photo.real-listing{background:linear-gradient(135deg,#123f47,#0b777d);color:#fff}
+.gi-reonomy-photo.real-listing b{font-size:14px;letter-spacing:.04em}
+.gr-external-link{display:flex!important;align-items:center;justify-content:center;gap:7px;text-decoration:none}
+.gr-map-legend.real-offer i.sale{background:#0b8588!important}
+.gr-map-legend.real-offer i.rent{background:#b98235!important}
+.gr-map-precision-note{position:absolute;left:14px;bottom:14px;max-width:360px;background:rgba(255,255,255,.94);border:1px solid #dce8e8;border-radius:4px;padding:8px 10px;font-size:6px;line-height:1.45;color:#6f878a;z-index:480;box-shadow:0 4px 14px rgba(20,60,64,.08)}
+@media(max-width:720px){.gr-map-precision-note{left:10px;right:10px;max-width:none;font-size:7px}}
