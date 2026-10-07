@@ -9,7 +9,7 @@ const UPSTREAM='https://growa-territorial.onrender.com/data/territories/mx-sin-m
 const CODESIN_UPSTREAM='https://growa-territorial.onrender.com/data/territories/mx-sin-mazatlan/geometry/codesin-districts.geojson'
 const LOCAL_DATA=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../public/data')
 
-let state={loadedAt:null,records:[],marketPulse:null,finance:null,urbanFootprint:null,districts:[],source:'unloaded'}
+let state={loadedAt:null,records:[],marketPulse:null,finance:null,urbanFootprint:null,districts:[],properties:[],source:'unloaded'}
 let loading=null
 
 const num=v=>v===null||v===undefined||v===''?null:Number.isFinite(Number(v))?Number(v):null
@@ -92,6 +92,22 @@ async function loadUrlJson(url,localName,optional=false){
     try{return JSON.parse(await readFile(path.join(LOCAL_DATA,localName),'utf8'))}
     catch{if(optional)return null;throw error}
   }
+}
+async function loadPropertyListings(){
+  const files=['listings-centro.json','listings-marina.json','listings-sabalo.json']
+  const packs=await Promise.all(files.map(async name=>{
+    try{return JSON.parse(await readFile(path.join(LOCAL_DATA,name),'utf8'))}
+    catch{return {records:[]}}
+  }))
+  return packs.flatMap(x=>x.records||[]).map(p=>({
+    ...p,
+    title:p.title||((p.type||'Propiedad')+' en '+(p.zone||'Mazatlán')),
+    estimated_value:Number(p.price)||null,
+    synthetic:false,
+    location_note:p.location_precision==='zone_anchor'
+      ?'Ubicación aproximada: el punto representa la zona publicada por el anuncio, no la coordenada exacta del inmueble.'
+      :null,
+  }))
 }
 function flattenCoords(value,out=[]){
   if(!Array.isArray(value))return out
@@ -231,7 +247,7 @@ function marketSummary(){
 async function load(){
   if(loading)return loading
   loading=(async()=>{
-    const [core,extra,marketPulse,finance,urbanFootprint,agebGeometry,codesin]=await Promise.all([
+    const [core,extra,marketPulse,finance,urbanFootprint,agebGeometry,codesin,properties]=await Promise.all([
       loadJson('ageb-core.json'),
       loadJson('ageb-profile-extra.json',true),
       loadJson('market-pulse.json',true),
@@ -239,11 +255,12 @@ async function load(){
       loadJson('agebs-huella-urbana.json',true),
       loadJson('ageb-geometry-2020.geojson',true),
       loadUrlJson(CODESIN_UPSTREAM,'codesin-districts.geojson',true),
+      loadPropertyListings(),
     ])
     const extras=new Map((extra?.records||[]).map(r=>[String(r.cvegeo_ageb||''),r]))
     const records=score(unpackCore(core).filter(isUrban).map(r=>derive({...r,...(extras.get(String(r.cvegeo_ageb||''))||{})})))
     const districts=buildDistricts(records,agebGeometry,codesin)
-    state={loadedAt:new Date().toISOString(),records,marketPulse,finance,urbanFootprint,districts,source:'growa-territorial'}
+    state={loadedAt:new Date().toISOString(),records,marketPulse,finance,urbanFootprint,districts,properties,source:'growa-territorial'}
     return state
   })().finally(()=>{loading=null})
   return loading
@@ -331,7 +348,7 @@ const server=http.createServer(async(req,res)=>{
           {key:'codesin',name:'Distritos CODESIN',scale:'distrito',status:'observed',coverage:state.districts.length+' distritos'},
           {key:'sniiv_finance',name:finance.source||'SNIIV/SEDATU - Financiamientos de vivienda',scale:'municipio',status:'observed',observed_through:finance.observed_through||null},
           {key:'market_pulse',name:pulse.source||'Market Pulse',scale:'municipio',status:'observed',observed_through:pulse.observed_through||null},
-          {key:'property_demo',name:'Capa de oportunidades inmobiliarias',scale:'activo',status:'synthetic',note:'Superficie, precio y valor son simulados para diseño de producto.'},
+          {key:'property_supply',name:'Oferta inmobiliaria observada',scale:'anuncio',status:'observed',coverage:state.properties.length+' anuncios',note:'Precios de oferta publicados; la ubicación cartográfica es aproximada cuando el anuncio no publica coordenadas exactas.'},
           {key:'opportunity_score',name:'Opportunity Score Growa',scale:'AGEB / distrito',status:'derived',note:'Proxy demográfico; no es avalúo ni predicción de ventas.'}
         ],
         loaded_at:state.loadedAt
@@ -420,109 +437,101 @@ const server=http.createServer(async(req,res)=>{
           {key:'districts',label:'Distritos CODESIN',status:'observed'},
           {key:'finance',label:'Financiamiento',status:'observed'},
           {key:'opportunity',label:'Opportunity Score',status:'derived'},
-          {key:'properties',label:'Property layer',status:'synthetic'}
+          {key:'properties',label:'Oferta inmobiliaria',status:'observed'}
         ],
         loaded_at:state.loadedAt,source:state.source
       })
     }
     if(url.pathname==='/api/property-facets'){
-      const universe=syntheticProperties(state.records,100)
-      const byType={}
-      for(const p of universe)byType[p.type]=(byType[p.type]||0)+1
-      const values=universe.map(p=>p.estimated_value).filter(Number.isFinite).sort((a,b)=>a-b)
-      const prices=universe.map(p=>p.price_m2).filter(Number.isFinite).sort((a,b)=>a-b)
-      const areas=universe.map(p=>p.area_m2).filter(Number.isFinite).sort((a,b)=>a-b)
-      const q=(arr,p)=>arr[Math.min(arr.length-1,Math.max(0,Math.floor((arr.length-1)*p)))]||null
+      const universe=state.properties
+      const byType={},byOperation={},byZone={}
+      for(const p of universe){
+        byType[p.type]=(byType[p.type]||0)+1
+        byOperation[p.operation]=(byOperation[p.operation]||0)+1
+        byZone[p.zone]=(byZone[p.zone]||0)+1
+      }
+      const nums=(key,filter=()=>true)=>universe.filter(filter).map(p=>Number(p[key])).filter(Number.isFinite).sort((a,b)=>a-b)
+      const q=(arr,p)=>arr.length?arr[Math.min(arr.length-1,Math.max(0,Math.floor((arr.length-1)*p)))]:null
+      const salePrices=nums('price_m2',p=>p.operation==='Venta')
+      const rentPrices=nums('price_m2',p=>p.operation==='Renta')
+      const areas=nums('area_m2')
       return json(req,res,200,{
-        total:universe.length,
-        types:byType,
+        total:universe.length,types:byType,operations:byOperation,zones:byZone,
         ranges:{
-          value:{min:values[0]||null,p25:q(values,.25),median:q(values,.5),p75:q(values,.75),max:values.at(-1)||null},
-          price_m2:{min:prices[0]||null,p25:q(prices,.25),median:q(prices,.5),p75:q(prices,.75),max:prices.at(-1)||null},
-          area_m2:{min:areas[0]||null,p25:q(areas,.25),median:q(areas,.5),p75:q(areas,.75),max:areas.at(-1)||null}
+          sale_price_m2:{min:salePrices[0]||null,median:q(salePrices,.5),max:salePrices.at(-1)||null},
+          rent_price_m2:{min:rentPrices[0]||null,median:q(rentPrices,.5),max:rentPrices.at(-1)||null},
+          area_m2:{min:areas[0]||null,median:q(areas,.5),max:areas.at(-1)||null}
         },
-        synthetic:true,source:'derived-demo'
+        synthetic:false,source:'public-listings'
       })
     }
     if(url.pathname==='/api/properties'){
-      const limit=parseLimit(url.searchParams.get('limit'),24,100)
+      const limit=parseLimit(url.searchParams.get('limit'),100,250)
       const type=(url.searchParams.get('type')||'').trim().toLowerCase()
+      const operation=(url.searchParams.get('operation')||'').trim().toLowerCase()
+      const zone=(url.searchParams.get('zone')||'').trim().toLowerCase()
       const query=(url.searchParams.get('q')||'').trim().toLowerCase()
-      const sort=url.searchParams.get('sort')||'score_desc'
-      const minScore=Number(url.searchParams.get('min_score')||0)
+      const sort=url.searchParams.get('sort')||'date_desc'
       const minArea=Number(url.searchParams.get('min_area')||0)
       const maxArea=Number(url.searchParams.get('max_area')||Infinity)
       const minPrice=Number(url.searchParams.get('min_price_m2')||0)
       const maxPrice=Number(url.searchParams.get('max_price_m2')||Infinity)
-      const minValue=Number(url.searchParams.get('min_value')||0)
-      const maxValue=Number(url.searchParams.get('max_value')||Infinity)
-      const universe=syntheticProperties(state.records,100)
-      let rows=universe.filter(p=>{
-        const typeOk=!type||type==='todos'||p.type.toLowerCase()===type
-        const queryOk=!query||
-          p.id.toLowerCase().includes(query)||
-          p.type.toLowerCase().includes(query)||
-          p.title.toLowerCase().includes(query)||
-          ('ageb '+p.location_id.slice(-4)).includes(query)||
-          p.location_id.toLowerCase().includes(query)
-        return typeOk && queryOk &&
-          p.opportunity_score>=minScore &&
-          p.area_m2>=minArea && p.area_m2<=maxArea &&
-          p.price_m2>=minPrice && p.price_m2<=maxPrice &&
-          p.estimated_value>=minValue && p.estimated_value<=maxValue
+      let rows=state.properties.filter(p=>{
+        const area=Number(p.area_m2)
+        const pm2=Number(p.price_m2)
+        const typeOk=!type||type==='todos'||String(p.type||'').toLowerCase()===type
+        const opOk=!operation||operation==='todos'||String(p.operation||'').toLowerCase()===operation
+        const zoneOk=!zone||zone==='todas'||String(p.zone||'').toLowerCase()===zone
+        const queryOk=!query||[p.id,p.type,p.operation,p.zone,p.address,p.source,p.franchise].some(v=>String(v||'').toLowerCase().includes(query))
+        return typeOk&&opOk&&zoneOk&&queryOk&&
+          (!minArea||area>=minArea)&&(!Number.isFinite(maxArea)||area<=maxArea)&&
+          (!minPrice||pm2>=minPrice)&&(!Number.isFinite(maxPrice)||pm2<=maxPrice)
       })
       rows.sort((a,b)=>{
-        if(sort==='value_desc')return b.estimated_value-a.estimated_value
-        if(sort==='price_asc')return a.price_m2-b.price_m2
-        if(sort==='area_desc')return b.area_m2-a.area_m2
-        return b.opportunity_score-a.opportunity_score
+        if(sort==='price_desc')return (Number(b.price)||0)-(Number(a.price)||0)
+        if(sort==='price_asc')return (Number(a.price)||0)-(Number(b.price)||0)
+        if(sort==='price_m2_asc')return (Number(a.price_m2)||Infinity)-(Number(b.price_m2)||Infinity)
+        if(sort==='area_desc')return (Number(b.area_m2)||0)-(Number(a.area_m2)||0)
+        return String(b.observed_at||'').localeCompare(String(a.observed_at||''))
       })
       const total=rows.length
       rows=rows.slice(0,limit)
-      const avg=key=>rows.length?rows.reduce((a,r)=>a+(Number(r[key])||0),0)/rows.length:null
+      const sale=rows.filter(p=>p.operation==='Venta')
+      const rent=rows.filter(p=>p.operation==='Renta')
+      const avg=(arr,key)=>arr.length?arr.reduce((a,r)=>a+(Number(r[key])||0),0)/arr.length:null
       return json(req,res,200,{
-        rows,total,synthetic:true,source:'derived-demo',
+        rows,total,synthetic:false,source:'public-listings',
         summary:{
-          avg_score:avg('opportunity_score'),
-          avg_price_m2:avg('price_m2'),
-          avg_area_m2:avg('area_m2'),
-          visible_value:rows.reduce((a,r)=>a+(Number(r.estimated_value)||0),0)
+          sale_count:sale.length,rent_count:rent.length,
+          avg_sale_price_m2:avg(sale,'price_m2'),
+          avg_rent_price_m2:avg(rent,'price_m2'),
+          avg_area_m2:avg(rows,'area_m2')
         },
-        filters:{type:type||null,q:query||null,sort,min_score:minScore,min_area:minArea||null,max_area:Number.isFinite(maxArea)?maxArea:null,min_price_m2:minPrice||null,max_price_m2:Number.isFinite(maxPrice)?maxPrice:null,min_value:minValue||null,max_value:Number.isFinite(maxValue)?maxValue:null}
+        filters:{type:type||null,operation:operation||null,zone:zone||null,q:query||null,sort}
       })
     }
     if(url.pathname.startsWith('/api/properties/')){
       const id=decodeURIComponent(url.pathname.slice('/api/properties/'.length))
-      const property=syntheticProperties(state.records,100).find(p=>p.id===id)
-      if(!property)return json(req,res,404,{error:'Activo no encontrado'},'no-store')
-      const location=state.records.find(r=>r.id===property.location_id)
-      const district=state.districts.find(d=>d.ageb_ids.includes(property.location_id))||null
-      const universe=syntheticProperties(state.records,100)
+      const property=state.properties.find(p=>String(p.id)===id)
+      if(!property)return json(req,res,404,{error:'Oferta no encontrada'},'no-store')
+      const universe=state.properties.filter(p=>p.operation===property.operation)
       const percentileRank=(value,key)=>{
         const vals=universe.map(x=>Number(x[key])).filter(Number.isFinite).sort((a,b)=>a-b)
         if(!vals.length||!Number.isFinite(Number(value)))return null
-        const below=vals.filter(v=>v<=Number(value)).length
-        return Math.round(below/vals.length*100)
+        return Math.round(vals.filter(v=>v<=Number(value)).length/vals.length*100)
       }
       return json(req,res,200,{
         property,
-        location:pick(location),
-        district:district?{name:district.name,slug:district.slug,opportunity_score:district.opportunity_score}:null,
+        location:null,
+        district:null,
         market:marketSummary(),
         benchmarks:{
-          score_percentile:percentileRank(property.opportunity_score,'opportunity_score'),
           price_m2_percentile:percentileRank(property.price_m2,'price_m2'),
           area_percentile:percentileRank(property.area_m2,'area_m2'),
-          value_percentile:percentileRank(property.estimated_value,'estimated_value')
+          price_percentile:percentileRank(property.price,'price')
         },
-        signals:[
-          {key:'location_score',label:'Oportunidad territorial',value:property.opportunity_score,unit:'/100',status:'derived'},
-          {key:'population',label:'Población AGEB',value:location?.population||null,status:'observed'},
-          {key:'households',label:'Hogares AGEB',value:location?.households||null,status:'observed'},
-          {key:'mobility',label:'Movilidad reciente',value:location?.recent_mobility_share||null,unit:'%',status:'observed'}
-        ],
-        synthetic:true,
-        source:'derived-demo + growa-territorial'
+        synthetic:false,
+        source:'public-listings'
       })
     }
     return json(req,res,404,{error:'Ruta no encontrada'},'no-store')
