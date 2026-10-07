@@ -749,6 +749,15 @@ function PropertyMap({rows=[],selected,onSelect}){
   return <div className="gi-property-map" ref={node}/>
 }
 
+function formatObservedDate(value){
+  if(!value)return null
+  try{return new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeZone:'UTC'}).format(new Date(value+'T00:00:00Z'))}
+  catch{return value}
+}
+function propertyMoney(property,value){
+  if(value===null||value===undefined||value==='')return null
+  return property.currency==='USD'?'$'+fmt(value)+' USD':mxn(value)
+}
 function PropertyDrawer({property,onClose}){
   const [saved,setSaved]=useState(()=>{try{return JSON.parse(localStorage.getItem('growa_saved_properties')||'[]').includes(property.id)}catch{return false}})
   const toggle=()=>{
@@ -759,44 +768,72 @@ function PropertyDrawer({property,onClose}){
       setSaved(next.includes(property.id))
     }catch{}
   }
-  const price=property.currency==='USD'?'$'+fmt(property.price)+' USD':mxn(property.price)
-  const observed=property.observed_at?new Intl.DateTimeFormat('es-MX',{dateStyle:'medium',timeZone:'UTC'}).format(new Date(property.observed_at+'T00:00:00Z')):'—'
+  const price=propertyMoney(property,property.price)
+  const observed=formatObservedDate(property.observed_at)
+  const amenities=String(property.features||'').split(';').map(x=>x.trim()).filter(Boolean)
+  const specs=[
+    property.area_m2!=null&&['Superficie',fmt(property.area_m2,1)+' m²'],
+    property.land_m2!=null&&Number(property.land_m2)!==Number(property.area_m2)&&['Terreno',fmt(property.land_m2,1)+' m²'],
+    property.price_m2!=null&&[property.operation==='Renta'?'Renta / m² / mes':'Precio / m²',propertyMoney(property,property.price_m2)],
+    property.bedrooms!=null&&['Recámaras',property.bedrooms],
+    property.bathrooms!=null&&['Baños',property.bathrooms],
+    property.parking!=null&&['Estacionamientos',property.parking],
+    property.maintenance_mxn!=null&&['Mantenimiento',mxn(property.maintenance_mxn)+' / mes'],
+    property.condition&&['Condición',property.condition],
+  ].filter(Boolean)
+  const publication=[
+    property.source&&['Fuente',property.source],
+    property.franchise&&property.franchise!==property.source&&['Inmobiliaria',property.franchise],
+    property.office_agent&&['Oficina / agente',property.office_agent],
+    property.external_key&&['Clave externa',property.external_key],
+    property.listing_id&&['ID anuncio',property.listing_id],
+    observed&&['Fecha de consulta',observed],
+    property.zone&&['Zona publicada',property.zone],
+  ].filter(Boolean)
+  const precision=property.map_location?.precision
+  const locationText=
+    precision==='direccion'||precision==='direccion_cache'
+      ?'Ubicación basada en la dirección publicada.'
+      :precision==='colonia'
+        ?'La fuente no publica coordenada exacta; el punto representa la colonia publicada.'
+        :'La fuente no publica coordenada exacta; el punto representa la zona publicada.'
+
   return <aside className="gi-reonomy-drawer gi-property-detail-v2">
     <div className="gi-reonomy-drawer-top">
       <button onClick={onClose} aria-label="Cerrar ficha"><X size={17}/></button>
-      <div><span>{property.operation} · {property.type}</span><small>{property.source} · {property.id}</small></div>
+      <div><span>{property.operation} · {property.type}</span><small>{property.source}{property.listing_id?' · '+property.listing_id:''}</small></div>
       <button className={saved?'saved':''} onClick={toggle} aria-label={saved?'Quitar de guardados':'Guardar propiedad'} aria-pressed={saved}><Bookmark size={16}/></button>
     </div>
+
     <div className="gi-reonomy-photo real-listing"><Building2 size={34}/><span>OFERTA PUBLICADA</span><b>{property.operation}</b></div>
+
     <div className="gi-reonomy-title">
       <span>{property.zone} · Mazatlán</span>
       <h2>{property.address||property.title}</h2>
       <strong>{price}{property.operation==='Renta'?<small> / mes</small>:null}</strong>
-      <small>Consultado {observed} · {property.franchise||property.source}</small>
+      {observed&&<small>Consultado {observed}</small>}
     </div>
-    <section className="gi-reonomy-section">
-      <header><span>CARACTERÍSTICAS</span><b>{property.operation}</b></header>
+
+    {specs.length>0&&<section className="gi-reonomy-section">
+      <header><span>CARACTERÍSTICAS</span></header>
       <div className="gi-reonomy-specs">
-        <div><span>Superficie</span><strong>{property.area_m2?fmt(property.area_m2,1)+' m²':'—'}</strong></div>
-        <div><span>Precio / m²</span><strong>{property.price_m2?(property.currency==='USD'?'$'+fmt(property.price_m2)+' USD':mxn(property.price_m2)):'—'}</strong></div>
-        <div><span>Recámaras</span><strong>{property.bedrooms??'—'}</strong></div>
-        <div><span>Baños</span><strong>{property.bathrooms??'—'}</strong></div>
-        <div><span>Estacionamientos</span><strong>{property.parking??'—'}</strong></div>
-        <div><span>Fuente</span><strong>{property.source||'—'}</strong></div>
+        {specs.map(([label,value])=><div key={label}><span>{label}</span><strong>{value}</strong></div>)}
       </div>
-    </section>
+    </section>}
+
+    {amenities.length>0&&<section className="gi-reonomy-section">
+      <header><span>AMENIDADES / EQUIPAMIENTO</span></header>
+      <div className="gr-amenity-chips">{amenities.map(item=><span key={item}>{item}</span>)}</div>
+    </section>}
+
     <section className="gi-reonomy-section">
-      <header><span>PUBLICACIÓN</span><small>{observed}</small></header>
-      <div className="gr-location-kpis">
-        <div><span>Zona</span><strong>{property.zone||'—'}</strong></div>
-        <div><span>Inmobiliaria</span><strong>{property.franchise||property.source||'—'}</strong></div>
+      <header><span>PUBLICACIÓN</span><small>{property.source}</small></header>
+      <div className="gr-publication-list">
+        {publication.map(([label,value])=><div key={label}><span>{label}</span><strong>{value}</strong></div>)}
       </div>
-      <p className="gi-reonomy-copy">{property.map_location?.precision==='direccion'||property.map_location?.precision==='direccion_cache'
-  ?'El punto corresponde a una dirección publicada.'
-  :property.map_location?.precision==='colonia'
-    ?'El punto se ubica dentro de la colonia publicada; no se presenta como coordenada exacta.'
-    :'El punto usa una referencia segura de la zona publicada mientras no exista una coordenada más precisa.'}</p>
-      {property.listing_url?<a className="gi-reonomy-primary gr-external-link" href={property.listing_url} target="_blank" rel="noreferrer">Abrir anuncio original <ArrowUpRight size={13}/></a>:null}
+      {property.address_note&&<p className="gr-address-note"><Info size={13}/><span>{property.address_note}</span></p>}
+      <p className="gi-reonomy-copy">{locationText}</p>
+      {property.listing_url&&<a className="gi-reonomy-primary gr-external-link" href={property.listing_url} target="_blank" rel="noreferrer">Abrir anuncio original <ArrowUpRight size={13}/></a>}
     </section>
   </aside>
 }
