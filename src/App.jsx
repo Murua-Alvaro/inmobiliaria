@@ -686,6 +686,10 @@ function Properties(){
   useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(''),3000);return()=>clearTimeout(timer)},[toast])
   const clear=()=>{setOperation('Todos');setZone('Todas');setType('Todos');setQuery('')}
   return <main tabIndex={-1} className="gi-reonomy gi-reonomy-v2">
+    <section className="gr-offer-head">
+      <div><span>OFERTA INMOBILIARIA · MAZATLÁN</span><h1>Ver oferta inmobiliaria</h1><p>Mapa de anuncios publicados de venta y renta con precio, características, fecha de consulta y enlace individual a la fuente.</p></div>
+      <div className="gr-offer-head-meta"><strong>{rows.length}</strong><span>ofertas visibles</span></div>
+    </section>
     <div className="gr-searchbar">
       <div className="gr-search"><Search size={17}/><input aria-label="Buscar propiedades" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar dirección, zona, inmobiliaria o ID"/>{query&&<button onClick={()=>setQuery('')}><X size={14}/></button>}</div>
       <span className="gr-location"><MapPin size={15}/> Mazatlán, Sinaloa</span>
@@ -768,7 +772,7 @@ function App(){
   else if(page==='location'&&route.id)content=<LocationProfile key={route.id} id={route.id}/>
   else if(page==='district'&&route.id)content=<DistrictProfile key={route.id} slug={route.id}/>
   else if(page==='market')content=<Market/>
-  else if(page==='properties')content=<Properties/>
+  else if(page==='offers'||page==='properties')content=<Properties/>
   else if(page==='territory')content=<TerritoryWorkspace/>
   else if(page.split('?')[0]==='portfolio')content=<Portfolio/>
   return <div className="gi-app">
