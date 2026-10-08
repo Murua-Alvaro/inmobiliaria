@@ -487,64 +487,20 @@ function Market(){
   </main>
 }
 
-const PROPERTY_GEOCODE_CACHE='growa_property_geocode_v5'
+const PROPERTY_GEOCODE_CACHE='growa_property_geocode_v6'
+const MAZATLAN_BOUNDS={south:23.10,north:23.36,west:-106.56,east:-106.30}
 
-const OFFER_ZONES={
-  'Centro':{
-    label:'Centro',
-    bounds:{south:23.1905,north:23.2185,west:-106.4345,east:-106.4055},
-    center:[23.2038,-106.4200]
-  },
-  'Marina Mazatlán':{
-    label:'Marina Mazatlán',
-    bounds:{south:23.2580,north:23.2865,west:-106.4765,east:-106.4430},
-    center:[23.2723,-106.4598]
-  },
-  'Sábalo Country':{
-    label:'Sábalo Country',
-    bounds:{south:23.2410,north:23.2648,west:-106.4615,east:-106.4410},
-    center:[23.2532,-106.4512]
-  }
-}
-
-function mapFold(value=''){
-  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()
-}
-function zoneConfig(zone=''){
-  const key=mapFold(zone)
-  return Object.values(OFFER_ZONES).find(z=>mapFold(z.label)===key)||null
-}
 function cleanGeocodeText(value=''){
-  return String(value).replace(/\bNA\b/gi,'').replace(/#S\/N/gi,'').replace(/\s+/g,' ').replace(/^\s*[\/,-]+|[\/,-]+\s*$/g,'').trim()
+  return String(value)
+    .replace(/\bNA\b/gi,'')
+    .replace(/#S\/N/gi,'')
+    .replace(/\s+/g,' ')
+    .replace(/^\s*[\/,-]+|[\/,-]+\s*$/g,'')
+    .trim()
 }
-function pointInOfferZone(zone,lat,lng){
-  const cfg=zoneConfig(zone)
-  if(!cfg||!Number.isFinite(Number(lat))||!Number.isFinite(Number(lng)))return false
-  const b=cfg.bounds
-  return Number(lat)>=b.south&&Number(lat)<=b.north&&Number(lng)>=b.west&&Number(lng)<=b.east
-}
-function stableHash(value=''){
-  let h=2166136261
-  for(const ch of String(value)){
-    h^=ch.charCodeAt(0)
-    h=Math.imul(h,16777619)
-  }
-  return h>>>0
-}
-function deterministicZonePoint(property){
-  const cfg=zoneConfig(property.zone)
-  if(!cfg)return null
-  const b=cfg.bounds
-  const h=stableHash(property.id||property.listing_id||property.address||property.zone)
-  const h2=stableHash((property.address||'')+'|'+h)
-  const fx=.12+((h%10000)/10000)*.76
-  const fy=.12+((h2%10000)/10000)*.76
-  return {
-    lat:b.south+(b.north-b.south)*fy,
-    lng:b.west+(b.east-b.west)*fx,
-    precision:'zona',
-    label:cfg.label
-  }
+function isInsideMazatlan(lat,lng){
+  return Number(lat)>=MAZATLAN_BOUNDS.south&&Number(lat)<=MAZATLAN_BOUNDS.north&&
+    Number(lng)>=MAZATLAN_BOUNDS.west&&Number(lng)<=MAZATLAN_BOUNDS.east
 }
 function readGeocodeCache(){
   try{return JSON.parse(localStorage.getItem(PROPERTY_GEOCODE_CACHE)||'{}')}
@@ -553,106 +509,130 @@ function readGeocodeCache(){
 function writeGeocodeCache(cache){
   try{localStorage.setItem(PROPERTY_GEOCODE_CACHE,JSON.stringify(cache))}catch{}
 }
-async function geocodePublishedAddress(property){
+function hasSpecificLocation(property){
   const address=cleanGeocodeText(property.address||'')
-  if(!address||/^s\/c$/i.test(address)||address.length<5)return null
-  const cfg=zoneConfig(property.zone)
-  if(!cfg)return null
-  const b=cfg.bounds
-  const viewbox=[b.west,b.north,b.east,b.south].join(',')
-  const query=address+', '+property.zone+', Mazatlán, Sinaloa, México'
+  if(!address||/^s\/c$/i.test(address))return false
+  const generic=[
+    'marina mazatlán','mazatlán marina mazatlán','fraccionamiento marina mazatlán',
+    'sábalo country','sabalo country','centro','na / marina mazatlán'
+  ]
+  const folded=address.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
+  if(generic.some(x=>folded===x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase()))return false
+  return address.length>=5
+}
+function geocodeQueries(property){
+  const address=cleanGeocodeText(property.address||'')
+  if(!hasSpecificLocation(property))return []
+  const zone=cleanGeocodeText(property.zone||'')
+  const queries=[
+    address+', Mazatlán, Sinaloa, México',
+    address+(zone?', '+zone:'')+', Mazatlán, Sinaloa, México'
+  ]
+  if(address.includes('/')){
+    const parts=address.split('/').map(x=>x.trim()).filter(Boolean)
+    for(const part of parts)queries.push(part+', Mazatlán, Sinaloa, México')
+  }
+  return [...new Set(queries)]
+}
+async function geocodeOneQuery(query){
+  const viewbox='-106.56,23.36,-106.30,23.10'
   try{
-    const url='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=mx&bounded=1&viewbox='+encodeURIComponent(viewbox)+'&q='+encodeURIComponent(query)
+    const url='https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=3&countrycodes=mx&bounded=1&viewbox='+encodeURIComponent(viewbox)+'&q='+encodeURIComponent(query)
     const response=await fetch(url,{headers:{Accept:'application/json'}})
     if(!response.ok)return null
-    const hit=(await response.json())?.[0]
-    const lat=Number(hit?.lat),lng=Number(hit?.lon)
-    if(!pointInOfferZone(property.zone,lat,lng))return null
-    return {lat,lng,precision:'direccion',label:hit.display_name||address}
-  }catch{return null}
+    const hits=await response.json()
+    for(const hit of hits||[]){
+      const lat=Number(hit.lat),lng=Number(hit.lon)
+      const display=String(hit.display_name||'')
+      if(!isInsideMazatlan(lat,lng))continue
+      if(!/mazatl/i.test(display))continue
+      return {lat,lng,label:display,precision:'direccion_verificada',query}
+    }
+  }catch{}
+  return null
+}
+async function geocodeProperty(property){
+  for(const query of geocodeQueries(property)){
+    const result=await geocodeOneQuery(query)
+    if(result)return result
+    await new Promise(r=>setTimeout(r,1050))
+  }
+  return null
 }
 
 function PropertyMap({rows=[],selected,onSelect}){
   const node=useRef(null),mapRef=useRef(null),layerRef=useRef(null)
   const [geoPoints,setGeoPoints]=useState({})
+  const [geocoding,setGeocoding]=useState(false)
 
   useEffect(()=>{
     if(!node.current||mapRef.current)return
     const map=L.map(node.current,{
-      zoomAnimation:false,
-      fadeAnimation:false,
-      markerZoomAnimation:false,
-      zoomControl:false,
-      attributionControl:true,
-      minZoom:10,
-      maxZoom:18
+      zoomAnimation:false,fadeAnimation:false,markerZoomAnimation:false,
+      zoomControl:false,attributionControl:true,minZoom:10,maxZoom:18
     })
-
     L.tileLayer(
       'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       {maxZoom:19,subdomains:'abc',attribution:'© OpenStreetMap contributors'}
     ).addTo(map)
-
     L.control.zoom({position:'bottomright'}).addTo(map)
     map.setView([23.238,-106.438],12)
     mapRef.current=map
-
     const resize=new ResizeObserver(()=>map.invalidateSize())
     resize.observe(node.current)
     return()=>{resize.disconnect();map.remove();mapRef.current=null}
   },[])
 
   useEffect(()=>{
+    let cancelled=false
     const cache=readGeocodeCache()
-    const next={}
+    const valid={}
     rows.forEach(p=>{
-      const cached=cache[String(p.id)]
-      if(
-        cached&&
-        cached.precision==='direccion'&&
-        pointInOfferZone(p.zone,Number(cached.lat),Number(cached.lng))
-      ){
-        next[String(p.id)]=cached
-      }else{
-        const fallback=deterministicZonePoint(p)
-        if(fallback)next[String(p.id)]=fallback
-      }
+      const hit=cache[String(p.id)]
+      if(hit&&hit.precision==='direccion_verificada'&&isInsideMazatlan(hit.lat,hit.lng))valid[String(p.id)]=hit
     })
-    setGeoPoints(next)
+    setGeoPoints(valid)
+
+    ;(async()=>{
+      setGeocoding(true)
+      for(const property of rows){
+        if(cancelled)break
+        const key=String(property.id)
+        if(cache[key]?.precision==='direccion_verificada'&&isInsideMazatlan(cache[key].lat,cache[key].lng))continue
+        if(!hasSpecificLocation(property))continue
+        const result=await geocodeProperty(property)
+        if(cancelled)break
+        if(result){
+          cache[key]=result
+          writeGeocodeCache(cache)
+          setGeoPoints(prev=>({...prev,[key]:result}))
+        }else{
+          cache[key]={precision:'no_geocodificado'}
+          writeGeocodeCache(cache)
+        }
+      }
+      if(!cancelled)setGeocoding(false)
+    })()
+
+    return()=>{cancelled=true}
   },[rows])
 
   useEffect(()=>{
     const map=mapRef.current
     if(!map)return
     if(layerRef.current)layerRef.current.remove()
-
     const layer=L.layerGroup().addTo(map)
     const points=[]
 
-    const usedZones=[...new Set(rows.map(p=>p.zone).filter(Boolean))]
-    usedZones.forEach(zone=>{
-      const cfg=zoneConfig(zone)
-      if(!cfg)return
-      const b=cfg.bounds
-      const rectangle=L.rectangle(
-        [[b.south,b.west],[b.north,b.east]],
-        {color:'#6f9fa0',weight:1,fillColor:'#7cb8b2',fillOpacity:.035,dashArray:'4 5',interactive:false}
-      ).addTo(layer)
-      rectangle.bindTooltip(cfg.label,{direction:'center',className:'gr-zone-label',permanent:false})
-    })
-
     rows.forEach(p=>{
-      const resolved=geoPoints[String(p.id)]||deterministicZonePoint(p)
-      if(!resolved)return
+      const resolved=geoPoints[String(p.id)]
+      if(!resolved||resolved.precision!=='direccion_verificada')return
       const lat=Number(resolved.lat),lng=Number(resolved.lng)
-      if(!Number.isFinite(lat)||!Number.isFinite(lng))return
-      if(!pointInOfferZone(p.zone,lat,lng))return
+      if(!isInsideMazatlan(lat,lng))return
 
-      const pt=[lat,lng]
-      points.push(pt)
-
+      points.push([lat,lng])
       const active=selected&&String(selected.id)===String(p.id)
-      const marker=L.circleMarker(pt,{
+      const marker=L.circleMarker([lat,lng],{
         radius:active?8:6,
         color:active?'#073f46':'#ffffff',
         weight:active?3:2,
@@ -661,49 +641,27 @@ function PropertyMap({rows=[],selected,onSelect}){
       }).addTo(layer)
 
       const price=p.currency==='USD'?'$'+fmt(p.price)+' USD':mxn(p.price)
-      const precisionLabel=resolved.precision==='direccion'?'dirección publicada':'ubicación aproximada dentro de '+p.zone
-
       marker.bindTooltip(
         '<div class="gi-map-tip"><small>'+String(p.operation||'Oferta')+' · '+String(p.zone||'Mazatlán')+
         '</small><strong>'+price+'</strong><span>'+String(p.address||p.type||'Propiedad')+
-        '</span><em>'+precisionLabel+'</em></div>',
+        '</span><em>dirección geocodificada</em></div>',
         {direction:'top',offset:[0,-5]}
       )
-
-      marker.on('click',async()=>{
-        let chosen={...p,map_location:resolved}
-        if(resolved.precision!=='direccion'){
-          const refined=await geocodePublishedAddress(p)
-          if(refined){
-            const cache=readGeocodeCache()
-            cache[String(p.id)]=refined
-            writeGeocodeCache(cache)
-            setGeoPoints(prev=>({...prev,[String(p.id)]:refined}))
-            chosen={...p,map_location:refined}
-          }
-        }
-        onSelect?.(chosen)
-      })
+      marker.on('click',()=>onSelect?.({...p,map_location:resolved}))
     })
 
     layerRef.current=layer
 
-    const zoneCorners=usedZones.flatMap(zone=>{
-      const cfg=zoneConfig(zone)
-      if(!cfg)return []
-      const b=cfg.bounds
-      return [[b.south,b.west],[b.north,b.east]]
-    })
-
-    const fitPoints=zoneCorners.length?zoneCorners:points
-    if(fitPoints.length&&!selected){
-      const bounds=L.latLngBounds(fitPoints)
-      if(bounds.isValid())map.fitBounds(bounds.pad(.08),{maxZoom:13,padding:[28,28]})
+    if(points.length&&!selected){
+      const bounds=L.latLngBounds(points)
+      if(bounds.isValid())map.fitBounds(bounds.pad(.12),{maxZoom:14,padding:[34,34]})
+    }else if(!points.length){
+      map.setView([23.238,-106.438],12)
     }
 
     if(selected){
-      const resolved=geoPoints[String(selected.id)]||selected.map_location||deterministicZonePoint(selected)
-      if(resolved&&pointInOfferZone(selected.zone,Number(resolved.lat),Number(resolved.lng))){
+      const resolved=geoPoints[String(selected.id)]||selected.map_location
+      if(resolved&&resolved.precision==='direccion_verificada'&&isInsideMazatlan(resolved.lat,resolved.lng)){
         map.panTo([Number(resolved.lat),Number(resolved.lng)],{animate:false})
       }
     }
@@ -716,7 +674,14 @@ function PropertyMap({rows=[],selected,onSelect}){
     }
   },[rows,selected,onSelect,geoPoints])
 
-  return <div className="gi-property-map" ref={node}/>
+  const mapped=rows.filter(p=>geoPoints[String(p.id)]?.precision==='direccion_verificada').length
+  return <div className="gi-property-map-wrap">
+    <div className="gi-property-map" ref={node}/>
+    <div className="gr-map-geocode-status">
+      <strong>{mapped}</strong><span> de {rows.length} ofertas ubicadas por dirección publicada</span>
+      {geocoding&&<em> · verificando domicilios…</em>}
+    </div>
+  </div>
 }
 
 function formatObservedDate(value){
@@ -911,7 +876,7 @@ function Properties(){
         {view!=='table'?<>
           <PropertyMap rows={rows} selected={selected} onSelect={setSelected}/>
           <div className="gr-map-legend real-offer"><strong>Oferta publicada</strong><span><i className="sale"/> Venta</span><span><i className="rent"/> Renta</span></div>
-          <div className="gr-map-count"><MapPin size={13}/>{rows.length} ofertas</div>
+          <div className="gr-map-count"><MapPin size={13}/>{rows.length} ofertas en inventario</div>
           <div className="gr-map-precision-note">Ubicación por prioridad: dirección o desarrollo publicado → colonia/zona → referencia aproximada. El mapa indica el nivel de precisión de cada punto.</div>
         </>:<div className="gr-table">
           <div className="gr-table-head"><span>Propiedad</span><span>Operación</span><span>Zona</span><span>Área</span><span>Precio</span><span>Fecha</span></div>
