@@ -727,11 +727,9 @@ function PropertyDrawer({property,onClose}){
   ].filter(Boolean)
   const precision=property.map_location?.precision
   const locationText=
-    precision==='direccion'||precision==='direccion_cache'
-      ?'Ubicación basada en la dirección publicada.'
-      :precision==='colonia'
-        ?'La fuente no publica coordenada exacta; el punto representa la colonia publicada.'
-        :'La fuente no publica coordenada exacta; el punto representa la zona publicada.'
+    precision==='direccion_verificada'
+      ?'Ubicación obtenida de la dirección o desarrollo publicado y validada dentro de Mazatlán.'
+      :'La fuente no publica un domicilio que pueda resolverse con suficiente precisión; esta oferta no debe interpretarse como un punto exacto.'
 
   return <aside className="gi-reonomy-drawer gi-property-detail-v2">
     <div className="gi-reonomy-drawer-top">
