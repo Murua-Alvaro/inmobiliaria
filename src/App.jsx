@@ -487,7 +487,7 @@ function Market(){
   </main>
 }
 
-const PROPERTY_GEOCODE_CACHE='growa_property_geocode_v8'
+const PROPERTY_GEOCODE_CACHE='growa_property_geocode_v9'
 const MAZATLAN_BOUNDS={south:23.10,north:23.36,west:-106.56,east:-106.30}
 
 function cleanGeocodeText(value=''){
@@ -640,6 +640,100 @@ function hasUsableFootprint(hit){
   if(['suburb','neighbourhood','city','town','municipality','administrative'].includes(addresstype))return false
   return true
 }
+function distanceMeters(aLat,aLng,bLat,bLng){
+  const R=6371000
+  const p1=Number(aLat)*Math.PI/180
+  const p2=Number(bLat)*Math.PI/180
+  const dp=(Number(bLat)-Number(aLat))*Math.PI/180
+  const dl=(Number(bLng)-Number(aLng))*Math.PI/180
+  const x=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2
+  return 2*R*Math.atan2(Math.sqrt(x),Math.sqrt(1-x))
+}
+function buildingNameTokens(element){
+  const tags=element?.tags||{}
+  return normalizeToken([
+    tags.name,
+    tags['addr:housename'],
+    tags['building:name'],
+    tags.operator
+  ].filter(Boolean).join(' ')).split(' ').filter(t=>t.length>=4)
+}
+async function nearbyBuildings(lat,lng,radius=70){
+  const query='[out:json][timeout:18];('+
+    'way["building"](around:'+radius+','+lat+','+lng+');'+
+    'relation["building"](around:'+radius+','+lat+','+lng+');'+
+    ');out center tags;'
+  try{
+    const url='https://overpass-api.de/api/interpreter?data='+encodeURIComponent(query)
+    const response=await fetch(url,{headers:{Accept:'application/json'}})
+    if(!response.ok)return []
+    const data=await response.json()
+    return (data.elements||[]).map(el=>{
+      const center=el.center||{}
+      const bLat=Number(center.lat),bLng=Number(center.lon)
+      return {...el,_lat:bLat,_lng:bLng,_distance:distanceMeters(lat,lng,bLat,bLng)}
+    }).filter(el=>Number.isFinite(el._lat)&&Number.isFinite(el._lng)&&isInsideMazatlan(el._lat,el._lng))
+      .sort((a,b)=>a._distance-b._distance)
+  }catch{return []}
+}
+function bestNearbyBuilding(property,hit,buildings){
+  if(!buildings.length)return null
+  const expected=expectedStreetNumber(property)
+  const hitNumber=String(hit?.address?.house_number||'').trim()
+  const exactNumber=expected&&hitNumber===expected
+
+  if(expected){
+    const numbered=buildings.filter(b=>String(b.tags?.['addr:housenumber']||'').trim()===expected)
+    if(numbered.length)return numbered[0]
+    if(exactNumber){
+      const near=buildings.find(b=>b._distance<=28)
+      if(near)return near
+    }
+    return null
+  }
+
+  const wanted=locationTokens(property)
+  if(wanted.length){
+    let best=null,bestScore=0
+    for(const b of buildings){
+      const hay=buildingNameTokens(b)
+      const score=wanted.filter(t=>hay.some(h=>h.includes(t)||t.includes(h))).length
+      if(score>bestScore&&b._distance<=90){best=b;bestScore=score}
+    }
+    if(best&&bestScore>=1)return best
+  }
+
+  const category=normalizeToken(hit?.category||hit?.class||'')
+  const addresstype=normalizeToken(hit?.addresstype||'')
+  const buildingLike=category==='building'||['building','house','apartments','residential','hotel'].includes(addresstype)
+  if(buildingLike){
+    const near=buildings.find(b=>b._distance<=22)
+    if(near)return near
+  }
+  return null
+}
+async function snapAddressHitToBuilding(property,hit){
+  const lat=Number(hit?.lat),lng=Number(hit?.lon)
+  if(!isInsideMazatlan(lat,lng))return null
+  const buildings=await nearbyBuildings(lat,lng,80)
+  const building=bestNearbyBuilding(property,hit,buildings)
+  if(!building)return null
+  return {
+    lat:building._lat,
+    lng:building._lng,
+    label:String(hit.display_name||property.address||''),
+    precision:'edificio_osm_verificado',
+    osm_type:building.type||null,
+    osm_id:building.id||null,
+    category:'building',
+    result_type:building.tags?.building||'building',
+    addresstype:'building',
+    house_number:building.tags?.['addr:housenumber']||hit.address?.house_number||null,
+    building_distance_m:Math.round(building._distance),
+    building_name:building.tags?.name||building.tags?.['addr:housename']||null
+  }
+}
+
 async function geocodeOneQuery(property,query){
   const viewbox='-106.56,23.36,-106.30,23.10'
   try{
@@ -647,30 +741,37 @@ async function geocodeOneQuery(property,query){
     const response=await fetch(url,{headers:{Accept:'application/json'}})
     if(!response.ok)return null
     const hits=await response.json()
+
     for(const hit of hits||[]){
+      const lat=Number(hit.lat),lng=Number(hit.lon)
       const display=String(hit.display_name||'')
+      if(!isInsideMazatlan(lat,lng))continue
       if(!/mazatl/i.test(display))continue
       if(!resultMatchesPublishedLocation(property,hit))continue
-      if(!hasUsableFootprint(hit))continue
 
-      const point=interiorPoint(hit.geojson)
-      if(!point||!isInsideMazatlan(point.lat,point.lng))continue
-
-      return {
-        lat:point.lat,
-        lng:point.lng,
-        label:display,
-        precision:'huella_verificada',
-        query,
-        osm_type:hit.osm_type||null,
-        osm_id:hit.osm_id||null,
-        category:hit.category||hit.class||null,
-        result_type:hit.type||null,
-        addresstype:hit.addresstype||null,
-        house_number:hit.address?.house_number||null,
-        geometry_type:hit.geojson?.type||null,
-        footprint:hit.geojson
+      if(hasUsableFootprint(hit)){
+        const point=interiorPoint(hit.geojson)
+        if(point&&isInsideMazatlan(point.lat,point.lng)){
+          return {
+            lat:point.lat,
+            lng:point.lng,
+            label:display,
+            precision:'huella_verificada',
+            query,
+            osm_type:hit.osm_type||null,
+            osm_id:hit.osm_id||null,
+            category:hit.category||hit.class||null,
+            result_type:hit.type||null,
+            addresstype:hit.addresstype||null,
+            house_number:hit.address?.house_number||null,
+            geometry_type:hit.geojson?.type||null,
+            footprint:hit.geojson
+          }
+        }
       }
+
+      const snapped=await snapAddressHitToBuilding(property,hit)
+      if(snapped)return {...snapped,query}
     }
   }catch{}
   return null
@@ -713,7 +814,7 @@ function PropertyMap({rows=[],selected,onSelect}){
     const valid={}
     rows.forEach(p=>{
       const hit=cache[String(p.id)]
-      if(hit&&hit.precision==='huella_verificada'&&isInsideMazatlan(hit.lat,hit.lng))valid[String(p.id)]=hit
+      if(hit&&['huella_verificada','edificio_osm_verificado'].includes(hit.precision)&&isInsideMazatlan(hit.lat,hit.lng))valid[String(p.id)]=hit
     })
     setGeoPoints(valid)
 
@@ -722,7 +823,7 @@ function PropertyMap({rows=[],selected,onSelect}){
       for(const property of rows){
         if(cancelled)break
         const key=String(property.id)
-        if(cache[key]?.precision==='huella_verificada'&&isInsideMazatlan(cache[key].lat,cache[key].lng))continue
+        if(['huella_verificada','edificio_osm_verificado'].includes(cache[key]?.precision)&&isInsideMazatlan(cache[key].lat,cache[key].lng))continue
         if(!hasSpecificLocation(property))continue
         const result=await geocodeProperty(property)
         if(cancelled)break
@@ -750,7 +851,7 @@ function PropertyMap({rows=[],selected,onSelect}){
 
     rows.forEach(p=>{
       const resolved=geoPoints[String(p.id)]
-      if(!resolved||resolved.precision!=='huella_verificada')return
+      if(!resolved||!['huella_verificada','edificio_osm_verificado'].includes(resolved.precision))return
       const lat=Number(resolved.lat),lng=Number(resolved.lng)
       if(!isInsideMazatlan(lat,lng))return
 
@@ -768,7 +869,7 @@ function PropertyMap({rows=[],selected,onSelect}){
       marker.bindTooltip(
         '<div class="gi-map-tip"><small>'+String(p.operation||'Oferta')+' · '+String(p.zone||'Mazatlán')+
         '</small><strong>'+price+'</strong><span>'+String(p.address||p.type||'Propiedad')+
-        '</span><em>huella de predio / edificio</em></div>',
+        '</span><em>edificio verificado</em></div>',
         {direction:'top',offset:[0,-5]}
       )
       marker.on('click',()=>onSelect?.({...p,map_location:resolved}))
@@ -785,7 +886,7 @@ function PropertyMap({rows=[],selected,onSelect}){
 
     if(selected){
       const resolved=geoPoints[String(selected.id)]||selected.map_location
-      if(resolved&&resolved.precision==='huella_verificada'&&isInsideMazatlan(resolved.lat,resolved.lng)){
+      if(resolved&&['huella_verificada','edificio_osm_verificado'].includes(resolved.precision)&&isInsideMazatlan(resolved.lat,resolved.lng)){
         map.panTo([Number(resolved.lat),Number(resolved.lng)],{animate:false})
       }
     }
@@ -798,11 +899,11 @@ function PropertyMap({rows=[],selected,onSelect}){
     }
   },[rows,selected,onSelect,geoPoints])
 
-  const mapped=rows.filter(p=>geoPoints[String(p.id)]?.precision==='huella_verificada').length
+  const mapped=rows.filter(p=>geoPoints[String(p.id)]?.['huella_verificada','edificio_osm_verificado'].includes(precision)).length
   return <div className="gi-property-map-wrap">
     <div className="gi-property-map" ref={node}/>
     <div className="gr-map-geocode-status">
-      <strong>{mapped}</strong><span> de {rows.length} ofertas ubicadas con huella de predio o edificio</span>
+      <strong>{mapped}</strong><span> de {rows.length} ofertas ubicadas sobre edificio verificable</span>
       {geocoding&&<em> · verificando domicilios…</em>}
     </div>
   </div>
@@ -851,7 +952,7 @@ function PropertyDrawer({property,onClose}){
   ].filter(Boolean)
   const precision=property.map_location?.precision
   const locationText=
-    precision==='huella_verificada'
+    ['huella_verificada','edificio_osm_verificado'].includes(precision)
       ?'Ubicación obtenida de la dirección o desarrollo publicado y validada dentro de Mazatlán.'
       :'La fuente no publica un domicilio que pueda resolverse con suficiente precisión; esta oferta no debe interpretarse como un punto exacto.'
 
