@@ -899,7 +899,7 @@ function PropertyMap({rows=[],selected,onSelect}){
     }
   },[rows,selected,onSelect,geoPoints])
 
-  const mapped=rows.filter(p=>geoPoints[String(p.id)]?.['huella_verificada','edificio_osm_verificado'].includes(precision)).length
+  const mapped=rows.filter(p=>['huella_verificada','edificio_osm_verificado'].includes(geoPoints[String(p.id)]?.precision)).length
   return <div className="gi-property-map-wrap">
     <div className="gi-property-map" ref={node}/>
     <div className="gr-map-geocode-status">
