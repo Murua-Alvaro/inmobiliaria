@@ -961,7 +961,10 @@ function Properties(){
           {rows.map(p=><button key={p.id} className={'gr-result gr-result-v3 '+(selected?.id===p.id?'active':'')} onClick={()=>setSelected(p)}>
             <div className="gr-thumb gr-thumb-v3"><Building2 size={19}/><span>{p.operation}</span></div>
             <div className="gr-result-copy">
-              <div className="gr-result-kicker"><span className={'gr-op-badge '+(p.operation==='Renta'?'rent':'sale')}>{p.operation}</span><small>{p.source}{p.listing_id?' · '+p.listing_id:' · '+p.id}</small></div>
+              <div className="gr-result-kicker">
+                <span className={'gr-op-badge '+(p.operation==='Renta'?'rent':'sale')}>{p.operation}</span>
+                <small>{p.source}{p.listing_id?' · '+p.listing_id:' · '+p.id}</small>
+              </div>
               <strong>{p.address||p.title}</strong>
               <span>{p.zone} · {p.type}</span>
               <div className="gr-result-facts">
@@ -972,7 +975,11 @@ function Properties(){
               </div>
               {p.observed_at&&<small className="gr-result-date">Consultado {formatObservedDate(p.observed_at)}</small>}
             </div>
-            <div className="gr-result-metric"><strong>{p.currency==='USD'?'
+            <div className="gr-result-metric">
+              <strong>{p.currency==='USD' ? '$'+fmt(p.price)+' USD' : mxn(p.price)}</strong>
+              <span>{p.operation==='Renta' ? 'al mes' : (p.price_m2 ? mxn(p.price_m2)+'/m²' : 'precio publicado')}</span>
+            </div>
+          </button>)}
           {!rows.length&&<div className="gr-empty"><Search size={24}/><strong>{error||'No hay ofertas con estos filtros'}</strong><span>Prueba otra zona u operación.</span></div>}
         </div>}
       </section>
