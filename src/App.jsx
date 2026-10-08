@@ -953,7 +953,7 @@ function Properties(){
           <div><span>TOTAL</span><strong>{rows.length}</strong><small>ofertas visibles</small></div>
           <div><span>VENTA</span><strong>{sale.length}</strong><small>publicadas</small></div>
           <div><span>RENTA</span><strong>{rent.length}</strong><small>publicadas</small></div>
-          <div><span>VENTA · MEDIANA $/m²</span><strong>{medianSaleM2?mxn(Math.round(medianSaleM2)):'—'}</strong><small>{medianRent?'Renta mediana '+mxn(Math.round(medianRent)):'/ mes':'mercado observado'}</small></div>
+          <div><span>VENTA · MEDIANA $/m²</span><strong>{medianSaleM2?mxn(Math.round(medianSaleM2)):'—'}</strong><small>{medianRent?'Renta mediana '+mxn(Math.round(medianRent))+' / mes':'mercado observado'}</small></div>
         </div>
         <div className="gr-result-head gr-result-head-v3"><div><strong>Inventario</strong><span>Selecciona una propiedad para ver su ficha</span></div><button onClick={()=>exportProperties(rows)} disabled={!rows.length}><Download size={13}/> CSV</button></div>
         {loading?<div className="gr-loading">{Array.from({length:6},(_,i)=><i key={i}/>)}</div>:
