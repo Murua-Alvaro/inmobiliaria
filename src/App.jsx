@@ -487,93 +487,41 @@ function Market(){
   </main>
 }
 
-const PROPERTY_GEOCODE_CACHE='growa_property_geocode_v3'
-const MAP_ZONE_ALIASES={
-  'centro':['centro','centro historico'],
-  'marina mazatlan':['marina mazatlan','marina'],
-  'sabalo country':['sabalo country club','sabalo country']
+const PROPERTY_GEOCODE_CACHE='growa_property_geocode_v5'
+
+const OFFER_ZONES={
+  'Centro':{
+    label:'Centro',
+    bounds:{south:23.1905,north:23.2185,west:-106.4345,east:-106.4055},
+    center:[23.2038,-106.4200]
+  },
+  'Marina Mazatlán':{
+    label:'Marina Mazatlán',
+    bounds:{south:23.2580,north:23.2865,west:-106.4765,east:-106.4430},
+    center:[23.2723,-106.4598]
+  },
+  'Sábalo Country':{
+    label:'Sábalo Country',
+    bounds:{south:23.2410,north:23.2648,west:-106.4615,east:-106.4410},
+    center:[23.2532,-106.4512]
+  }
 }
-const SAFE_ZONE_ANCHORS={
-  'centro':{lat:23.2019,lng:-106.4217,label:'Centro'},
-  'marina mazatlan':{lat:23.2636,lng:-106.4624,label:'Marina Mazatlán'},
-  'sabalo country':{lat:23.2528,lng:-106.4554,label:'Sábalo Country'}
-}
+
 function mapFold(value=''){
   return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()
+}
+function zoneConfig(zone=''){
+  const key=mapFold(zone)
+  return Object.values(OFFER_ZONES).find(z=>mapFold(z.label)===key)||null
 }
 function cleanGeocodeText(value=''){
   return String(value).replace(/\bNA\b/gi,'').replace(/#S\/N/gi,'').replace(/\s+/g,' ').replace(/^\s*[\/,-]+|[\/,-]+\s*$/g,'').trim()
 }
-function zoneAliases(zone=''){
-  const key=mapFold(zone)
-  return MAP_ZONE_ALIASES[key]||[key]
-}
-function colonyName(feature){
-  return String(feature?.properties?.name||feature?.properties?.colonia||feature?.properties?.nombre||'').trim()
-}
-function matchColony(property,colonias){
-  const features=colonias?.features||[]
-  const aliases=zoneAliases(property.zone)
-  let best=null,bestScore=0
-  for(const ft of features){
-    const name=mapFold(colonyName(ft))
-    if(!name)continue
-    let score=0
-    for(const alias of aliases){
-      if(!alias)continue
-      if(name===alias)score=Math.max(score,100)
-      else if(name.includes(alias)||alias.includes(name))score=Math.max(score,75)
-    }
-    if(score>bestScore){best=ft;bestScore=score}
-  }
-  return best
-}
-function geometryBoundsCenter(feature){
-  let minLng=Infinity,minLat=Infinity,maxLng=-Infinity,maxLat=-Infinity
-  const walk=node=>{
-    if(!Array.isArray(node))return
-    if(node.length>=2&&Number.isFinite(Number(node[0]))&&Number.isFinite(Number(node[1]))){
-      const lng=Number(node[0]),lat=Number(node[1])
-      minLng=Math.min(minLng,lng);maxLng=Math.max(maxLng,lng)
-      minLat=Math.min(minLat,lat);maxLat=Math.max(maxLat,lat)
-      return
-    }
-    node.forEach(walk)
-  }
-  walk(feature?.geometry?.coordinates)
-  return Number.isFinite(minLng)?{lat:(minLat+maxLat)/2,lng:(minLng+maxLng)/2}:null
-}
-function pointInRing(lng,lat,ring=[]){
-  let inside=false
-  for(let i=0,j=ring.length-1;i<ring.length;j=i++){
-    const xi=Number(ring[i]?.[0]),yi=Number(ring[i]?.[1])
-    const xj=Number(ring[j]?.[0]),yj=Number(ring[j]?.[1])
-    if(![xi,yi,xj,yj].every(Number.isFinite))continue
-    const hit=((yi>lat)!==(yj>lat))&&(lng<(xj-xi)*(lat-yi)/((yj-yi)||1e-12)+xi)
-    if(hit)inside=!inside
-  }
-  return inside
-}
-function pointInPolygon(lng,lat,polygon=[]){
-  if(!polygon.length||!pointInRing(lng,lat,polygon[0]))return false
-  for(let i=1;i<polygon.length;i++)if(pointInRing(lng,lat,polygon[i]))return false
-  return true
-}
-function pointInGeometry(lng,lat,geometry){
-  if(!geometry)return false
-  if(geometry.type==='Polygon')return pointInPolygon(lng,lat,geometry.coordinates||[])
-  if(geometry.type==='MultiPolygon')return (geometry.coordinates||[]).some(poly=>pointInPolygon(lng,lat,poly))
-  return false
-}
-function fallbackPoint(property,colonias){
-  const feature=colonias?matchColony(property,colonias):null
-  const center=geometryBoundsCenter(feature)
-  if(center)return {...center,precision:'colonia',label:colonyName(feature)||property.zone,colony_feature:feature}
-  const anchor=SAFE_ZONE_ANCHORS[mapFold(property.zone)]
-  if(anchor)return {...anchor,precision:'zona_segura'}
-  const lat=Number(property.lat),lng=Number(property.lng)
-  if(Number.isFinite(lat)&&Number.isFinite(lng))return {lat,lng,precision:'zona_segura',label:property.zone||'Mazatlán'}
-  return null
+function pointInOfferZone(zone,lat,lng){
+  const cfg=zoneConfig(zone)
+  if(!cfg||!Number.isFinite(Number(lat))||!Number.isFinite(Number(lng)))return false
+  const b=cfg.bounds
+  return Number(lat)>=b.south&&Number(lat)<=b.north&&Number(lng)>=b.west&&Number(lng)<=b.east
 }
 function stableHash(value=''){
   let h=2166136261
@@ -583,72 +531,72 @@ function stableHash(value=''){
   }
   return h>>>0
 }
-function displayPointInsideArea(property,resolved,index=0){
-  let lat=Number(resolved?.lat),lng=Number(resolved?.lng)
-  if(!Number.isFinite(lat)||!Number.isFinite(lng))return null
-  if(resolved.precision==='direccion'||resolved.precision==='direccion_cache')return [lat,lng]
-
-  const feature=resolved.colony_feature
-  const seed=stableHash(property.id||property.listing_id||property.address||index)
-  const baseAngle=(seed%360)*Math.PI/180
-  const step=.00042
-  const maxTries=20
-  for(let k=0;k<maxTries;k++){
-    const radius=step*(1+Math.floor(k/4)+((seed>>5)%4)*.18)
-    const angle=baseAngle+k*2.399963
-    const candLat=lat+Math.sin(angle)*radius
-    const candLng=lng+Math.cos(angle)*radius
-    if(!feature||pointInGeometry(candLng,candLat,feature.geometry))return [candLat,candLng]
+function deterministicZonePoint(property){
+  const cfg=zoneConfig(property.zone)
+  if(!cfg)return null
+  const b=cfg.bounds
+  const h=stableHash(property.id||property.listing_id||property.address||property.zone)
+  const h2=stableHash((property.address||'')+'|'+h)
+  const fx=.12+((h%10000)/10000)*.76
+  const fy=.12+((h2%10000)/10000)*.76
+  return {
+    lat:b.south+(b.north-b.south)*fy,
+    lng:b.west+(b.east-b.west)*fx,
+    precision:'zona',
+    label:cfg.label
   }
-  return [lat,lng]
 }
-function readGeocodeCache(){try{return JSON.parse(localStorage.getItem(PROPERTY_GEOCODE_CACHE)||'{}')}catch{return {}}}
-function writeGeocodeCache(cache){try{localStorage.setItem(PROPERTY_GEOCODE_CACHE,JSON.stringify(cache))}catch{}}
-async function geocodePublishedAddress(property,colonias){
+function readGeocodeCache(){
+  try{return JSON.parse(localStorage.getItem(PROPERTY_GEOCODE_CACHE)||'{}')}
+  catch{return {}}
+}
+function writeGeocodeCache(cache){
+  try{localStorage.setItem(PROPERTY_GEOCODE_CACHE,JSON.stringify(cache))}catch{}
+}
+async function geocodePublishedAddress(property){
   const address=cleanGeocodeText(property.address||'')
   if(!address||/^s\/c$/i.test(address)||address.length<5)return null
-  const feature=matchColony(property,colonias)
-  if(!feature)return null
+  const cfg=zoneConfig(property.zone)
+  if(!cfg)return null
+  const b=cfg.bounds
+  const viewbox=[b.west,b.north,b.east,b.south].join(',')
   const query=address+', '+property.zone+', Mazatlán, Sinaloa, México'
   try{
-    const url='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=mx&viewbox=-106.56,23.34,-106.32,23.12&bounded=1&q='+encodeURIComponent(query)
+    const url='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=mx&bounded=1&viewbox='+encodeURIComponent(viewbox)+'&q='+encodeURIComponent(query)
     const response=await fetch(url,{headers:{Accept:'application/json'}})
     if(!response.ok)return null
     const hit=(await response.json())?.[0]
     const lat=Number(hit?.lat),lng=Number(hit?.lon)
-    if(!Number.isFinite(lat)||!Number.isFinite(lng))return null
-    if(!pointInGeometry(lng,lat,feature.geometry))return null
-    return {lat,lng,precision:'direccion',label:hit.display_name||query}
+    if(!pointInOfferZone(property.zone,lat,lng))return null
+    return {lat,lng,precision:'direccion',label:hit.display_name||address}
   }catch{return null}
 }
 
 function PropertyMap({rows=[],selected,onSelect}){
   const node=useRef(null),mapRef=useRef(null),layerRef=useRef(null)
-  const [colonias,setColonias]=useState(null)
   const [geoPoints,setGeoPoints]=useState({})
-
-  useEffect(()=>{
-    let active=true
-    fetch('/data/colonias-mazatlan.geojson')
-      .then(r=>r.ok?r.json():null)
-      .then(data=>{if(active)setColonias(data)})
-      .catch(()=>{if(active)setColonias(null)})
-    return()=>{active=false}
-  },[])
 
   useEffect(()=>{
     if(!node.current||mapRef.current)return
     const map=L.map(node.current,{
-      zoomAnimation:false,fadeAnimation:false,markerZoomAnimation:false,
-      zoomControl:false,attributionControl:true,minZoom:9,maxZoom:18
+      zoomAnimation:false,
+      fadeAnimation:false,
+      markerZoomAnimation:false,
+      zoomControl:false,
+      attributionControl:true,
+      minZoom:10,
+      maxZoom:18
     })
-    const baseTiles=L.tileLayer(
+
+    L.tileLayer(
       'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      {maxZoom:19,subdomains:'abc',attribution:'© OpenStreetMap contributors · colonias SEPOMEX'}
+      {maxZoom:19,subdomains:'abc',attribution:'© OpenStreetMap contributors'}
     ).addTo(map)
+
     L.control.zoom({position:'bottomright'}).addTo(map)
-    map.setView([23.245,-106.445],12)
+    map.setView([23.238,-106.438],12)
     mapRef.current=map
+
     const resize=new ResizeObserver(()=>map.invalidateSize())
     resize.observe(node.current)
     return()=>{resize.disconnect();map.remove();mapRef.current=null}
@@ -658,23 +606,20 @@ function PropertyMap({rows=[],selected,onSelect}){
     const cache=readGeocodeCache()
     const next={}
     rows.forEach(p=>{
-      const key=String(p.id)
-      const cached=cache[key]
-      const feature=colonias?matchColony(p,colonias):null
+      const cached=cache[String(p.id)]
       if(
         cached&&
-        Number.isFinite(Number(cached.lat))&&
-        Number.isFinite(Number(cached.lng))&&
-        (!feature||pointInGeometry(Number(cached.lng),Number(cached.lat),feature.geometry))
+        cached.precision==='direccion'&&
+        pointInOfferZone(p.zone,Number(cached.lat),Number(cached.lng))
       ){
-        next[key]={...cached,precision:feature?'direccion':'direccion_cache'}
+        next[String(p.id)]=cached
       }else{
-        const fallback=fallbackPoint(p,colonias)
-        if(fallback)next[key]=fallback
+        const fallback=deterministicZonePoint(p)
+        if(fallback)next[String(p.id)]=fallback
       }
     })
     setGeoPoints(next)
-  },[rows,colonias])
+  },[rows])
 
   useEffect(()=>{
     const map=mapRef.current
@@ -682,61 +627,53 @@ function PropertyMap({rows=[],selected,onSelect}){
     if(layerRef.current)layerRef.current.remove()
 
     const layer=L.layerGroup().addTo(map)
-    const zoneFeatures=[]
-    const seenZones=new Set()
-    if(colonias)rows.forEach(p=>{
-      const feature=matchColony(p,colonias)
-      const name=colonyName(feature)
-      if(feature&&name&&!seenZones.has(name)){
-        seenZones.add(name)
-        zoneFeatures.push(feature)
-      }
-    })
-    if(zoneFeatures.length){
-      L.geoJSON({type:'FeatureCollection',features:zoneFeatures},{
-        style:{color:'#6f9fa0',weight:1.2,fillColor:'#cfe4e2',fillOpacity:.09,dashArray:'4 4'},
-        onEachFeature:(ft,l)=>l.bindTooltip('<div class="gr-colony-tip"><strong>'+colonyName(ft)+'</strong><span>colonia de referencia</span></div>',{sticky:true})
-      }).addTo(layer)
-    }
-
     const points=[]
-    const occupied=new Map()
-    rows.forEach(p=>{
-      const resolved=geoPoints[String(p.id)]||fallbackPoint(p,colonias)
-      if(!resolved)return
 
-      const coordKey=Number(resolved.lat).toFixed(5)+'|'+Number(resolved.lng).toFixed(5)
-      const idx=occupied.get(coordKey)||0
-      occupied.set(coordKey,idx+1)
-      const pt=displayPointInsideArea(p,resolved,idx)
-      if(!pt)return
+    const usedZones=[...new Set(rows.map(p=>p.zone).filter(Boolean))]
+    usedZones.forEach(zone=>{
+      const cfg=zoneConfig(zone)
+      if(!cfg)return
+      const b=cfg.bounds
+      const rectangle=L.rectangle(
+        [[b.south,b.west],[b.north,b.east]],
+        {color:'#6f9fa0',weight:1,fillColor:'#7cb8b2',fillOpacity:.035,dashArray:'4 5',interactive:false}
+      ).addTo(layer)
+      rectangle.bindTooltip(cfg.label,{direction:'center',className:'gr-zone-label',permanent:false})
+    })
+
+    rows.forEach(p=>{
+      const resolved=geoPoints[String(p.id)]||deterministicZonePoint(p)
+      if(!resolved)return
+      const lat=Number(resolved.lat),lng=Number(resolved.lng)
+      if(!Number.isFinite(lat)||!Number.isFinite(lng))return
+      if(!pointInOfferZone(p.zone,lat,lng))return
+
+      const pt=[lat,lng]
       points.push(pt)
+
       const active=selected&&String(selected.id)===String(p.id)
       const marker=L.circleMarker(pt,{
         radius:active?8:6,
-        color:active?'#083f47':'#ffffff',
+        color:active?'#073f46':'#ffffff',
         weight:active?3:2,
         fillColor:p.operation==='Renta'?'#b98235':'#0b8588',
         fillOpacity:.96
       }).addTo(layer)
 
       const price=p.currency==='USD'?'$'+fmt(p.price)+' USD':mxn(p.price)
-      const precisionLabel=
-        resolved.precision==='direccion'||resolved.precision==='direccion_cache'
-          ?'dirección'
-          : resolved.precision==='colonia'
-            ?'colonia publicada'
-            :'zona publicada'
+      const precisionLabel=resolved.precision==='direccion'?'dirección publicada':'ubicación aproximada dentro de '+p.zone
+
       marker.bindTooltip(
         '<div class="gi-map-tip"><small>'+String(p.operation||'Oferta')+' · '+String(p.zone||'Mazatlán')+
         '</small><strong>'+price+'</strong><span>'+String(p.address||p.type||'Propiedad')+
         '</span><em>'+precisionLabel+'</em></div>',
         {direction:'top',offset:[0,-5]}
       )
+
       marker.on('click',async()=>{
         let chosen={...p,map_location:resolved}
-        if(colonias&&resolved.precision!=='direccion'&&resolved.precision!=='direccion_cache'){
-          const refined=await geocodePublishedAddress(p,colonias)
+        if(resolved.precision!=='direccion'){
+          const refined=await geocodePublishedAddress(p)
           if(refined){
             const cache=readGeocodeCache()
             cache[String(p.id)]=refined
@@ -750,19 +687,34 @@ function PropertyMap({rows=[],selected,onSelect}){
     })
 
     layerRef.current=layer
-    if(points.length&&!selected){
-      const bounds=L.latLngBounds(points)
-      if(bounds.isValid())map.fitBounds(bounds.pad(.08),{maxZoom:14,padding:[36,36]})
+
+    const zoneCorners=usedZones.flatMap(zone=>{
+      const cfg=zoneConfig(zone)
+      if(!cfg)return []
+      const b=cfg.bounds
+      return [[b.south,b.west],[b.north,b.east]]
+    })
+
+    const fitPoints=zoneCorners.length?zoneCorners:points
+    if(fitPoints.length&&!selected){
+      const bounds=L.latLngBounds(fitPoints)
+      if(bounds.isValid())map.fitBounds(bounds.pad(.08),{maxZoom:13,padding:[28,28]})
     }
+
     if(selected){
-      const resolved=geoPoints[String(selected.id)]||selected.map_location||fallbackPoint(selected,colonias)
-      if(resolved){
-        const lat=Number(resolved.lat),lng=Number(resolved.lng)
-        if(Number.isFinite(lat)&&Number.isFinite(lng))map.panTo([lat,lng],{animate:false})
+      const resolved=geoPoints[String(selected.id)]||selected.map_location||deterministicZonePoint(selected)
+      if(resolved&&pointInOfferZone(selected.zone,Number(resolved.lat),Number(resolved.lng))){
+        map.panTo([Number(resolved.lat),Number(resolved.lng)],{animate:false})
       }
     }
-    return()=>{if(layerRef.current===layer){layer.remove();layerRef.current=null}}
-  },[rows,selected,onSelect,geoPoints,colonias])
+
+    return()=>{
+      if(layerRef.current===layer){
+        layer.remove()
+        layerRef.current=null
+      }
+    }
+  },[rows,selected,onSelect,geoPoints])
 
   return <div className="gi-property-map" ref={node}/>
 }
