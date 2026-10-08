@@ -30,16 +30,16 @@ export function SiteHeader({ page }) {
     {marketing && <div className="gl-announcement"><span>Una nueva perspectiva del mercado inmobiliario de Mazatlán.</span><a href="#locations">Explorar datos <ArrowRight size={14}/></a></div>}
     <header className={'gl-header ' + (marketing ? 'marketing' : 'workspace')} ref={node}>
       <div className="gl-nav-wrap"><Brand/>
-        <div className="gl-audience"><a href="#home" className={page==='home'?'selected':''}>Desarrolladores</a><a href="#portfolio" className={page==='portfolio'?'selected':''}>Inmobiliarias</a></div>
+        {marketing&&<div className="gl-audience"><a href="#home" className={page==='home'?'selected':''}>Desarrolladores</a><a href="#portfolio" className={page==='portfolio'?'selected':''}>Inmobiliarias</a></div>}
         <button className="gl-menu-toggle" aria-label={mobile?'Cerrar menú':'Abrir menú'} aria-expanded={mobile} onClick={()=>setMobile(!mobile)}>{mobile?<X/>:<Menu/>}</button>
         <nav className={mobile?'is-open':''} aria-label="Navegación principal">
           <div className="gl-menu-parent"><button onClick={()=>setOpen(!open)} aria-expanded={open} aria-controls="platform-menu">Plataforma <ChevronDown size={15} className={open?'turned':''}/></button>
             {open && <div className="gl-mega" id="platform-menu"><div className="gl-mega-intro"><span>LA PLATAFORMA GROWA</span><h3>Cada ubicación cuenta una historia.</h3><p>Encuentra los datos para entenderla.</p><a href="#platform">Conoce la plataforma <ArrowRight size={16}/></a></div><div className="gl-mega-links">{products.map(({title,text,icon:Icon,route})=><a key={route} href={'#'+route}><Icon size={22}/><span><strong>{title}</strong><small>{text}</small></span><ArrowUpRight size={16}/></a>)}</div></div>}
           </div>
+          <a href="#offers" aria-current={page==='offers'||page==='properties'?'page':undefined}>Oferta</a>
           <a href="#territory" aria-current={page==='territory'?'page':undefined}>Territorio</a>
-          <a href="#offers" aria-current={page==='offers'?'page':undefined}>Ver oferta inmobiliaria</a>
           <a href="#market" aria-current={page==='market'?'page':undefined}>Mercado</a>
-          <a href="#platform" aria-current={page==='platform'?'page':undefined}>Nuestros datos</a>
+          <a href="#platform" aria-current={page==='platform'?'page':undefined}>Datos</a>
           <a className="gl-button" href="#portfolio">Mi cartera <ArrowUpRight size={17}/></a>
         </nav>
       </div>
