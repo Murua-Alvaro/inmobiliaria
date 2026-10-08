@@ -487,7 +487,7 @@ function Market(){
   </main>
 }
 
-const PROPERTY_GEOCODE_CACHE='growa_property_geocode_v7'
+const PROPERTY_GEOCODE_CACHE='growa_property_geocode_v8'
 const MAZATLAN_BOUNDS={south:23.10,north:23.36,west:-106.56,east:-106.30}
 
 function cleanGeocodeText(value=''){
@@ -577,30 +577,99 @@ function resultMatchesPublishedLocation(property,hit){
   const nonRoadObject=!['road','street','highway','suburb','neighbourhood','city','town','municipality'].includes(addresstype)
   return matched>=Math.min(2,tokens.length)&&category!=='highway'&&nonRoadObject
 }
+function ringContainsPoint(lng,lat,ring=[]){
+  let inside=false
+  for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+    const xi=Number(ring[i]?.[0]),yi=Number(ring[i]?.[1])
+    const xj=Number(ring[j]?.[0]),yj=Number(ring[j]?.[1])
+    if(![xi,yi,xj,yj].every(Number.isFinite))continue
+    const intersect=((yi>lat)!==(yj>lat))&&(lng<(xj-xi)*(lat-yi)/((yj-yi)||1e-12)+xi)
+    if(intersect)inside=!inside
+  }
+  return inside
+}
+function polygonContainsPoint(lng,lat,polygon=[]){
+  if(!polygon.length||!ringContainsPoint(lng,lat,polygon[0]))return false
+  for(let i=1;i<polygon.length;i++)if(ringContainsPoint(lng,lat,polygon[i]))return false
+  return true
+}
+function geometryContainsPoint(lng,lat,geometry){
+  if(!geometry)return false
+  if(geometry.type==='Polygon')return polygonContainsPoint(lng,lat,geometry.coordinates||[])
+  if(geometry.type==='MultiPolygon')return (geometry.coordinates||[]).some(poly=>polygonContainsPoint(lng,lat,poly))
+  return false
+}
+function geometryBounds(geometry){
+  let minLng=Infinity,minLat=Infinity,maxLng=-Infinity,maxLat=-Infinity
+  const walk=node=>{
+    if(!Array.isArray(node))return
+    if(node.length>=2&&Number.isFinite(Number(node[0]))&&Number.isFinite(Number(node[1]))){
+      const lng=Number(node[0]),lat=Number(node[1])
+      minLng=Math.min(minLng,lng);maxLng=Math.max(maxLng,lng)
+      minLat=Math.min(minLat,lat);maxLat=Math.max(maxLat,lat)
+      return
+    }
+    node.forEach(walk)
+  }
+  walk(geometry?.coordinates)
+  return Number.isFinite(minLng)?{minLng,minLat,maxLng,maxLat}:null
+}
+function interiorPoint(geometry){
+  const b=geometryBounds(geometry)
+  if(!b)return null
+  const cx=(b.minLng+b.maxLng)/2
+  const cy=(b.minLat+b.maxLat)/2
+  if(geometryContainsPoint(cx,cy,geometry))return {lng:cx,lat:cy}
+  for(let grid=3;grid<=11;grid+=2){
+    for(let yi=1;yi<grid;yi++){
+      for(let xi=1;xi<grid;xi++){
+        const lng=b.minLng+(b.maxLng-b.minLng)*(xi/grid)
+        const lat=b.minLat+(b.maxLat-b.minLat)*(yi/grid)
+        if(geometryContainsPoint(lng,lat,geometry))return {lng,lat}
+      }
+    }
+  }
+  return null
+}
+function hasUsableFootprint(hit){
+  const geometry=hit?.geojson
+  if(!geometry||!['Polygon','MultiPolygon'].includes(geometry.type))return false
+  const category=normalizeToken(hit?.category||hit?.class||'')
+  const addresstype=normalizeToken(hit?.addresstype||'')
+  if(['boundary','place'].includes(category))return false
+  if(['suburb','neighbourhood','city','town','municipality','administrative'].includes(addresstype))return false
+  return true
+}
 async function geocodeOneQuery(property,query){
   const viewbox='-106.56,23.36,-106.30,23.10'
   try{
-    const url='https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&extratags=1&namedetails=1&limit=5&countrycodes=mx&bounded=1&viewbox='+encodeURIComponent(viewbox)+'&q='+encodeURIComponent(query)
+    const url='https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&extratags=1&namedetails=1&polygon_geojson=1&limit=5&countrycodes=mx&bounded=1&viewbox='+encodeURIComponent(viewbox)+'&q='+encodeURIComponent(query)
     const response=await fetch(url,{headers:{Accept:'application/json'}})
     if(!response.ok)return null
     const hits=await response.json()
     for(const hit of hits||[]){
-      const lat=Number(hit.lat),lng=Number(hit.lon)
       const display=String(hit.display_name||'')
-      if(!isInsideMazatlan(lat,lng))continue
       if(!/mazatl/i.test(display))continue
       if(!resultMatchesPublishedLocation(property,hit))continue
+      if(!hasUsableFootprint(hit))continue
+
+      const point=interiorPoint(hit.geojson)
+      if(!point||!isInsideMazatlan(point.lat,point.lng))continue
+
       return {
-        lat,lng,
+        lat:point.lat,
+        lng:point.lng,
         label:display,
-        precision:'predio_edificio_verificado',
+        precision:'huella_verificada',
         query,
         osm_type:hit.osm_type||null,
         osm_id:hit.osm_id||null,
         category:hit.category||hit.class||null,
         result_type:hit.type||null,
         addresstype:hit.addresstype||null,
-        house_number:hit.address?.house_number||null
+        house_number:hit.address?.house_number||null,
+        geometry_type:hit.geojson?.type||null,
+        footprint:hit.geojson
       }
     }
   }catch{}
@@ -644,7 +713,7 @@ function PropertyMap({rows=[],selected,onSelect}){
     const valid={}
     rows.forEach(p=>{
       const hit=cache[String(p.id)]
-      if(hit&&hit.precision==='predio_edificio_verificado'&&isInsideMazatlan(hit.lat,hit.lng))valid[String(p.id)]=hit
+      if(hit&&hit.precision==='huella_verificada'&&isInsideMazatlan(hit.lat,hit.lng))valid[String(p.id)]=hit
     })
     setGeoPoints(valid)
 
@@ -653,7 +722,7 @@ function PropertyMap({rows=[],selected,onSelect}){
       for(const property of rows){
         if(cancelled)break
         const key=String(property.id)
-        if(cache[key]?.precision==='predio_edificio_verificado'&&isInsideMazatlan(cache[key].lat,cache[key].lng))continue
+        if(cache[key]?.precision==='huella_verificada'&&isInsideMazatlan(cache[key].lat,cache[key].lng))continue
         if(!hasSpecificLocation(property))continue
         const result=await geocodeProperty(property)
         if(cancelled)break
@@ -681,7 +750,7 @@ function PropertyMap({rows=[],selected,onSelect}){
 
     rows.forEach(p=>{
       const resolved=geoPoints[String(p.id)]
-      if(!resolved||resolved.precision!=='predio_edificio_verificado')return
+      if(!resolved||resolved.precision!=='huella_verificada')return
       const lat=Number(resolved.lat),lng=Number(resolved.lng)
       if(!isInsideMazatlan(lat,lng))return
 
@@ -699,7 +768,7 @@ function PropertyMap({rows=[],selected,onSelect}){
       marker.bindTooltip(
         '<div class="gi-map-tip"><small>'+String(p.operation||'Oferta')+' · '+String(p.zone||'Mazatlán')+
         '</small><strong>'+price+'</strong><span>'+String(p.address||p.type||'Propiedad')+
-        '</span><em>predio / edificio geocodificado</em></div>',
+        '</span><em>huella de predio / edificio</em></div>',
         {direction:'top',offset:[0,-5]}
       )
       marker.on('click',()=>onSelect?.({...p,map_location:resolved}))
@@ -716,7 +785,7 @@ function PropertyMap({rows=[],selected,onSelect}){
 
     if(selected){
       const resolved=geoPoints[String(selected.id)]||selected.map_location
-      if(resolved&&resolved.precision==='predio_edificio_verificado'&&isInsideMazatlan(resolved.lat,resolved.lng)){
+      if(resolved&&resolved.precision==='huella_verificada'&&isInsideMazatlan(resolved.lat,resolved.lng)){
         map.panTo([Number(resolved.lat),Number(resolved.lng)],{animate:false})
       }
     }
@@ -729,11 +798,11 @@ function PropertyMap({rows=[],selected,onSelect}){
     }
   },[rows,selected,onSelect,geoPoints])
 
-  const mapped=rows.filter(p=>geoPoints[String(p.id)]?.precision==='predio_edificio_verificado').length
+  const mapped=rows.filter(p=>geoPoints[String(p.id)]?.precision==='huella_verificada').length
   return <div className="gi-property-map-wrap">
     <div className="gi-property-map" ref={node}/>
     <div className="gr-map-geocode-status">
-      <strong>{mapped}</strong><span> de {rows.length} ofertas ubicadas en predio o edificio verificable</span>
+      <strong>{mapped}</strong><span> de {rows.length} ofertas ubicadas con huella de predio o edificio</span>
       {geocoding&&<em> · verificando domicilios…</em>}
     </div>
   </div>
@@ -782,7 +851,7 @@ function PropertyDrawer({property,onClose}){
   ].filter(Boolean)
   const precision=property.map_location?.precision
   const locationText=
-    precision==='predio_edificio_verificado'
+    precision==='huella_verificada'
       ?'Ubicación obtenida de la dirección o desarrollo publicado y validada dentro de Mazatlán.'
       :'La fuente no publica un domicilio que pueda resolverse con suficiente precisión; esta oferta no debe interpretarse como un punto exacto.'
 
