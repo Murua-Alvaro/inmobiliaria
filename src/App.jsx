@@ -841,6 +841,12 @@ function PropertyDrawer({property,onClose}){
 }
 
 function readStored(key,fallback){try{const data=JSON.parse(localStorage.getItem(key));return data??fallback}catch{return fallback}}
+function medianNumber(values=[]){
+  const clean=values.map(Number).filter(Number.isFinite).sort((a,b)=>a-b)
+  if(!clean.length)return null
+  const mid=Math.floor(clean.length/2)
+  return clean.length%2?clean[mid]:(clean[mid-1]+clean[mid])/2
+}
 function exportProperties(rows){
   const keys=['id','zone','operation','type','address','price','currency','area_m2','price_m2','bedrooms','bathrooms','parking','source','franchise','observed_at','listing_url']
   const cell=v=>'"'+String(v??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"'
@@ -881,59 +887,143 @@ function Properties(){
 
   const sale=rows.filter(p=>p.operation==='Venta')
   const rent=rows.filter(p=>p.operation==='Renta')
-  const avgSaleM2=sale.filter(p=>Number.isFinite(Number(p.price_m2))).length
-    ?Math.round(sale.reduce((a,p)=>a+(Number(p.price_m2)||0),0)/sale.filter(p=>Number.isFinite(Number(p.price_m2))).length):null
-  const avgRent=rent.length?Math.round(rent.reduce((a,p)=>a+(Number(p.price)||0),0)/rent.length):null
+  const medianSaleM2=medianNumber(sale.map(p=>p.price_m2))
+  const medianRent=medianNumber(rent.map(p=>p.price))
+  const latestObserved=[...rows].map(p=>p.observed_at).filter(Boolean).sort().at(-1)||null
+  const sourceCount=new Set(rows.map(p=>p.source).filter(Boolean)).size
+  const typeOptions=[...new Set(allRows.map(p=>p.type).filter(Boolean))].sort()
   useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(''),3000);return()=>clearTimeout(timer)},[toast])
   const clear=()=>{setOperation('Todos');setZone('Todas');setType('Todos');setQuery('')}
   return <main tabIndex={-1} className="gi-reonomy gi-reonomy-v2">
-    <section className="gr-offer-head">
-      <div><span>OFERTA INMOBILIARIA · MAZATLÁN</span><h1>Ver oferta inmobiliaria</h1><p>Mapa de anuncios publicados de venta y renta con precio, características, fecha de consulta y enlace individual a la fuente.</p></div>
-      <div className="gr-offer-head-meta"><strong>{rows.length}</strong><span>ofertas visibles</span></div>
+    <section className="gr-offer-head gr-offer-head-v3">
+      <div className="gr-offer-head-copy">
+        <span className="gr-eyebrow">OFERTA INMOBILIARIA · MAZATLÁN</span>
+        <h1>Oferta inmobiliaria</h1>
+        <p>Inventario de anuncios publicados de venta y renta. Cada registro conserva su fuente, fecha de consulta y enlace individual.</p>
+      </div>
+      <div className="gr-offer-head-status">
+        <div><span>INVENTARIO</span><strong>{rows.length}</strong><small>ofertas visibles</small></div>
+        <div><span>FUENTES</span><strong>{sourceCount}</strong><small>plataformas</small></div>
+        {latestObserved&&<div><span>ÚLTIMA CONSULTA</span><strong>{formatObservedDate(latestObserved)}</strong><small>fecha de captura</small></div>}
+      </div>
     </section>
-    <div className="gr-searchbar">
-      <div className="gr-search"><Search size={17}/><input aria-label="Buscar propiedades" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar dirección, zona, inmobiliaria o ID"/>{query&&<button onClick={()=>setQuery('')}><X size={14}/></button>}</div>
-      <span className="gr-location"><MapPin size={15}/> Mazatlán, Sinaloa</span>
-      <button className="gr-save" onClick={()=>{exportProperties(rows);setToast('CSV exportado con la oferta visible.')}}><Download size={14}/> Exportar</button>
+
+    <div className="gr-searchbar gr-searchbar-v3">
+      <div className="gr-search">
+        <Search size={17}/>
+        <input aria-label="Buscar propiedades" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Dirección, desarrollo, zona, inmobiliaria o ID"/>
+        {query&&<button onClick={()=>setQuery('')} aria-label="Limpiar búsqueda"><X size={14}/></button>}
+      </div>
+      <div className="gr-searchbar-actions">
+        <span className="gr-location"><MapPin size={15}/> Mazatlán, Sinaloa</span>
+        <button className="gr-save" onClick={()=>{exportProperties(rows);setToast('CSV exportado con la oferta visible.')}}><Download size={14}/> Exportar</button>
+      </div>
     </div>
 
-    <div className="gr-toolbar">
-      <div>
+    <div className="gr-toolbar gr-toolbar-v3">
+      <div className="gr-toolbar-main">
         <button className={filtersOpen?'active':''} onClick={()=>setFiltersOpen(v=>!v)}><ListFilter size={15}/> Filtros</button>
         <button className={savedOnly?'active':''} onClick={()=>{setSavedIds(readStored('growa_saved_properties',[]));setSavedOnly(v=>!v)}}><Bookmark size={15}/> Guardados</button>
+        <span className="gr-visible-count"><b>{rows.length}</b> resultados</span>
       </div>
-      <span><b>{rows.length}</b> ofertas publicadas</span>
-      <div className="gr-view">
-        <button className={view==='map'?'active':''} onClick={()=>setView('map')}><MapIcon size={14}/> Mapa</button>
-        <button className={'gr-mobile-only '+(view==='list'?'active':'')} onClick={()=>setView('list')}><LayoutGrid size={14}/> Lista</button>
-        <button className={view==='table'?'active':''} onClick={()=>setView('table')}><ListFilter size={14}/> Tabla</button>
+      <div className="gr-toolbar-side">
+        <div className="gr-view">
+          <button className={view==='map'?'active':''} onClick={()=>setView('map')}><MapIcon size={14}/> Mapa</button>
+          <button className={'gr-mobile-only '+(view==='list'?'active':'')} onClick={()=>setView('list')}><LayoutGrid size={14}/> Lista</button>
+          <button className={view==='table'?'active':''} onClick={()=>setView('table')}><ListFilter size={14}/> Tabla</button>
+        </div>
+        <label className="gr-sort">Ordenar<select value={sort} onChange={e=>setSort(e.target.value)}><option value="date_desc">Más reciente</option><option value="price_asc">Menor precio</option><option value="price_desc">Mayor precio</option><option value="price_m2_asc">Menor $/m²</option><option value="area_desc">Mayor superficie</option></select></label>
       </div>
-      <label>Ordenar <select value={sort} onChange={e=>setSort(e.target.value)}><option value="date_desc">Más reciente</option><option value="price_asc">Menor precio</option><option value="price_desc">Mayor precio</option><option value="price_m2_asc">Menor $/m²</option><option value="area_desc">Mayor superficie</option></select></label>
     </div>
 
     <div className={'gr-shell '+(view==='table'?'table-mode ':view==='list'?'list-mode ':'')+(!filtersOpen?'filters-collapsed ':'')+(selected?'has-drawer':'')}>
-      {filtersOpen&&<aside className="gr-filters">
-        <div className="gr-filter-head"><div><strong>Filtros</strong><span>Oferta observada</span></div><button onClick={clear}>Limpiar</button></div>
+      {filtersOpen&&<aside className="gr-filters gr-filters-v3">
+        <div className="gr-filter-head">
+          <div><strong>Filtros</strong><span>Ajusta el inventario visible</span></div>
+          <button onClick={clear}>Restablecer</button>
+        </div>
         <section><span>OPERACIÓN</span><div className="gr-filter-pills">{['Todos','Venta','Renta'].map(v=><button key={v} className={operation===v?'active':''} onClick={()=>setOperation(v)}>{v}</button>)}</div></section>
-        <section><span>ZONA</span><div className="gr-filter-pills">{['Todas','Centro','Marina Mazatlán','Sábalo Country'].map(v=><button key={v} className={zone===v?'active':''} onClick={()=>setZone(v)}>{v}</button>)}</div></section>
-        <section><span>TIPO</span><div className="gr-filter-pills">{['Todos','Departamento','Casa','Loft'].map(v=><button key={v} className={type===v?'active':''} onClick={()=>setType(v)}>{v}</button>)}</div></section>
-        <div className="gr-data-note"><Database size={14}/><div><strong>OFERTA PUBLICADA</strong><p>Precios de anuncio, no precios escriturados. Los puntos se ubican por zona cuando la fuente no publica coordenadas exactas.</p></div></div>
+        <section><span>ZONA</span><div className="gr-filter-pills gr-filter-pills-stack">{['Todas','Centro','Marina Mazatlán','Sábalo Country'].map(v=><button key={v} className={zone===v?'active':''} onClick={()=>setZone(v)}>{v}</button>)}</div></section>
+        {typeOptions.length>1&&<section><span>TIPO DE INMUEBLE</span><div className="gr-filter-pills">{['Todos',...typeOptions].map(v=><button key={v} className={type===v?'active':''} onClick={()=>setType(v)}>{v}</button>)}</div></section>}
+        <div className="gr-data-note"><Database size={15}/><div><strong>Acerca de los datos</strong><p>Son precios publicados de oferta. La ficha individual conserva la fuente y la fecha de consulta.</p></div></div>
       </aside>}
 
       <section className="gr-results">
-        <div className="gr-summary">
-          <div><span>OFERTAS</span><strong>{rows.length}</strong></div>
-          <div><span>VENTA</span><strong>{sale.length}</strong></div>
-          <div><span>VENTA · $/m² MEDIO</span><strong>{avgSaleM2?mxn(avgSaleM2):'—'}</strong></div>
-          <div><span>RENTA MEDIA</span><strong>{avgRent?mxn(avgRent):'—'}</strong></div>
+        <div className="gr-summary gr-summary-v3">
+          <div><span>TOTAL</span><strong>{rows.length}</strong><small>ofertas visibles</small></div>
+          <div><span>VENTA</span><strong>{sale.length}</strong><small>publicadas</small></div>
+          <div><span>RENTA</span><strong>{rent.length}</strong><small>publicadas</small></div>
+          <div><span>VENTA · MEDIANA $/m²</span><strong>{medianSaleM2?mxn(Math.round(medianSaleM2)):'—'}</strong><small>{medianRent?'Renta mediana '+mxn(Math.round(medianRent)):'/ mes':'mercado observado'}</small></div>
         </div>
-        <div className="gr-result-head"><span>INVENTARIO · FECHA DE CONSULTA EN CADA FICHA</span><button onClick={()=>exportProperties(rows)} disabled={!rows.length}><Download size={13}/> CSV</button></div>
+        <div className="gr-result-head gr-result-head-v3"><div><strong>Inventario</strong><span>Selecciona una propiedad para ver su ficha</span></div><button onClick={()=>exportProperties(rows)} disabled={!rows.length}><Download size={13}/> CSV</button></div>
         {loading?<div className="gr-loading">{Array.from({length:6},(_,i)=><i key={i}/>)}</div>:
         <div className="gr-result-list">
-          {rows.map(p=><button key={p.id} className={'gr-result '+(selected?.id===p.id?'active':'')} onClick={()=>setSelected(p)}>
-            <div className="gr-thumb"><Building2 size={20}/><span>{p.operation}</span></div>
-            <div className="gr-result-copy"><small>{p.source} · {p.id}</small><strong>{p.address||p.title}</strong><span>{p.zone} · {p.type}</span><div><em>{p.area_m2?fmt(p.area_m2,1)+' m²':'—'}</em><em>{p.bedrooms??'—'} rec. · {p.bathrooms??'—'} baños</em></div></div>
-            <div className="gr-result-metric"><strong>{p.currency==='USD'?'$'+fmt(p.price)+' USD':mxn(p.price)}</strong><span>{p.operation==='Renta'?'mensual':(p.price_m2?mxn(p.price_m2)+'/m²':'precio publicado')}</span></div>
+          {rows.map(p=><button key={p.id} className={'gr-result gr-result-v3 '+(selected?.id===p.id?'active':'')} onClick={()=>setSelected(p)}>
+            <div className="gr-thumb gr-thumb-v3"><Building2 size={19}/><span>{p.operation}</span></div>
+            <div className="gr-result-copy">
+              <div className="gr-result-kicker"><span className={'gr-op-badge '+(p.operation==='Renta'?'rent':'sale')}>{p.operation}</span><small>{p.source}{p.listing_id?' · '+p.listing_id:' · '+p.id}</small></div>
+              <strong>{p.address||p.title}</strong>
+              <span>{p.zone} · {p.type}</span>
+              <div className="gr-result-facts">
+                {p.area_m2!=null&&<em>{fmt(p.area_m2,1)} m²</em>}
+                {p.bedrooms!=null&&<em>{p.bedrooms} rec.</em>}
+                {p.bathrooms!=null&&<em>{p.bathrooms} baños</em>}
+                {p.parking!=null&&<em>{p.parking} estac.</em>}
+              </div>
+              {p.observed_at&&<small className="gr-result-date">Consultado {formatObservedDate(p.observed_at)}</small>}
+            </div>
+            <div className="gr-result-metric"><strong>{p.currency==='USD'?'
+          {!rows.length&&<div className="gr-empty"><Search size={24}/><strong>{error||'No hay ofertas con estos filtros'}</strong><span>Prueba otra zona u operación.</span></div>}
+        </div>}
+      </section>
+
+      <section className="gr-mapstage">
+        {view!=='table'?<>
+          <PropertyMap rows={rows} selected={selected} onSelect={setSelected}/>
+          <div className="gr-map-legend real-offer"><strong>Oferta publicada</strong><span><i className="sale"/> Venta</span><span><i className="rent"/> Renta</span></div>
+          <div className="gr-map-count"><MapPin size={13}/>{rows.length} ofertas en inventario</div>
+          <div className="gr-map-precision-note">Ubicación por prioridad: dirección o desarrollo publicado → colonia/zona → referencia aproximada. El mapa indica el nivel de precisión de cada punto.</div>
+        </>:<div className="gr-table">
+          <div className="gr-table-head"><span>Propiedad</span><span>Operación</span><span>Zona</span><span>Área</span><span>Precio</span><span>Fecha</span></div>
+          {rows.map(p=><button key={p.id} onClick={()=>setSelected(p)}><span><b>{p.address||p.title}</b><small>{p.source} · {p.id}</small></span><span>{p.operation}</span><span>{p.zone}</span><span>{p.area_m2?fmt(p.area_m2,1)+' m²':'—'}</span><span>{p.currency==='USD'?'$'+fmt(p.price)+' USD':mxn(p.price)}</span><strong>{p.observed_at||'—'}</strong></button>)}
+        </div>}
+      </section>
+      {selected&&<PropertyDrawer key={selected.id} property={selected} onClose={()=>setSelected(null)}/>}
+    </div>
+    {toast&&<div className="gr-toast" role="status">{toast}</div>}
+  </main>
+}
+
+function App(){
+  const [route,setRoute]=useState(routeFromHash)
+  useEffect(()=>{
+    const handler=()=>{setRoute(routeFromHash());window.scrollTo(0,0)}
+    addEventListener('hashchange',handler)
+    if(!location.hash)location.hash='home'
+    return()=>removeEventListener('hashchange',handler)
+  },[])
+  const status=apiStatus()
+  const page=route.page
+  let content=<Landing/>
+  if(page==='platform')content=<DataPlatform/>
+  else if(page==='property-intelligence')content=<PropertyIntelligenceRedirect/>
+  else if(page==='locations')content=<Locations/>
+  else if(page==='location'&&route.id)content=<LocationProfile key={route.id} id={route.id}/>
+  else if(page==='district'&&route.id)content=<DistrictProfile key={route.id} slug={route.id}/>
+  else if(page==='market')content=<Market/>
+  else if(page==='offers'||page==='properties')content=<Properties/>
+  else if(page==='territory')content=<TerritoryWorkspace/>
+  else if(page.split('?')[0]==='portfolio')content=<Portfolio/>
+  return <div className="gi-app">
+    <a className="gl-skip" href="#main-content" onClick={e=>{e.preventDefault();document.querySelector('main')?.focus()}}>Ir al contenido</a>
+    <SiteHeader page={page}/>
+    {content}
+    <SiteFooter/>
+  </div>
+}
+
+export default App
++fmt(p.price)+' USD':mxn(p.price)}</strong><span>{p.operation==='Renta'?'al mes':(p.price_m2?mxn(p.price_m2)+'/m²':'precio publicado')}</span></div>
           </button>)}
           {!rows.length&&<div className="gr-empty"><Search size={24}/><strong>{error||'No hay ofertas con estos filtros'}</strong><span>Prueba otra zona u operación.</span></div>}
         </div>}
